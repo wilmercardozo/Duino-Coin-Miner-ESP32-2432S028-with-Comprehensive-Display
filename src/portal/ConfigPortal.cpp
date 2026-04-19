@@ -68,7 +68,9 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
       <div class="algo-head">Bitcoin</div>
       <input name="btc_address" placeholder="Direccion Bitcoin (bc1q...)" class="w-full rounded p-2 text-sm mb-2">
       <input name="pool_url"    placeholder="Pool URL" value="public-pool.io" class="w-full rounded p-2 text-sm mb-2">
-      <input name="pool_port"   placeholder="Puerto" value="21496" type="number" class="w-full rounded p-2 text-sm">
+      <input name="pool_port"   placeholder="Puerto" value="21496" type="number" class="w-full rounded p-2 text-sm mb-2">
+      <input name="pool_url2"   placeholder="Pool URL secundario (opcional)" class="w-full rounded p-2 text-sm mb-2">
+      <input name="pool_port2"  placeholder="Puerto secundario" type="number" class="w-full rounded p-2 text-sm">
     </div>
 
     <p class="text-xs uppercase tracking-widest text-gray-500 mb-2">Opcional</p>
@@ -178,12 +180,15 @@ void ConfigPortal::start() {
             strlcpy(cfg.duco_key,    doc["duco_key"]    | "", sizeof(cfg.duco_key));
             strlcpy(cfg.btc_address, doc["btc_address"] | "", sizeof(cfg.btc_address));
             strlcpy(cfg.pool_url,    doc["pool_url"]    | "public-pool.io", sizeof(cfg.pool_url));
+            strlcpy(cfg.pool_url2,   doc["pool_url2"]   | "", sizeof(cfg.pool_url2));
             strlcpy(cfg.rig_name,    doc["rig_name"]    | "NerdDuino-1", sizeof(cfg.rig_name));
             // Form fields arrive as JSON strings (FormData stringifies everything).
             // ArduinoJson v7's `| default` returns default when type mismatches,
             // so use .as<int>() which parses string numerics ("1" -> 1).
             int port = doc["pool_port"].as<int>();
             cfg.pool_port = (port > 0 && port < 65536) ? (uint16_t)port : 21496;
+            int port2 = doc["pool_port2"].as<int>();
+            cfg.pool_port2 = (port2 > 0 && port2 < 65536) ? (uint16_t)port2 : 0;
 
             int tz = doc["timezone_offset"].as<int>();
             cfg.timezone_offset = (int8_t)((tz >= -12 && tz <= 14) ? tz : -5);

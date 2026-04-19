@@ -12,6 +12,10 @@ struct Config {
     char     btc_address[64]   = "";
     char     pool_url[64]      = "public-pool.io";
     uint16_t pool_port         = 21496;
+    // Optional secondary pool — failover target after repeated connect
+    // failures on the primary. Leave pool_url2 empty to disable.
+    char     pool_url2[64]     = "";
+    uint16_t pool_port2        = 0;
     char     rig_name[32]      = "NerdDuino-1";
     int8_t   timezone_offset   = -5;
     bool     valid             = false;

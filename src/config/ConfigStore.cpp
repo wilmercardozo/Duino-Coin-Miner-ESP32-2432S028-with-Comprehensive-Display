@@ -29,8 +29,10 @@ bool ConfigStore::load(Config& out) {
     strlcpy(out.duco_key,     doc["duco_key"]     | "", sizeof(out.duco_key));
     strlcpy(out.btc_address,  doc["btc_address"]  | "", sizeof(out.btc_address));
     strlcpy(out.pool_url,     doc["pool_url"]     | "public-pool.io", sizeof(out.pool_url));
+    strlcpy(out.pool_url2,    doc["pool_url2"]    | "", sizeof(out.pool_url2));
     strlcpy(out.rig_name,     doc["rig_name"]     | "NerdDuino-1", sizeof(out.rig_name));
     out.pool_port       = doc["pool_port"]       | 21496;
+    out.pool_port2      = doc["pool_port2"]      | 0;
     out.timezone_offset = doc["timezone_offset"] | -5;
     uint8_t algo = doc["algorithm"] | 0;
     out.algorithm = (algo == static_cast<uint8_t>(Algorithm::BITCOIN))
@@ -60,6 +62,8 @@ bool ConfigStore::save(const Config& cfg) {
     doc["btc_address"]      = cfg.btc_address;
     doc["pool_url"]         = cfg.pool_url;
     doc["pool_port"]        = cfg.pool_port;
+    doc["pool_url2"]        = cfg.pool_url2;
+    doc["pool_port2"]       = cfg.pool_port2;
     doc["rig_name"]         = cfg.rig_name;
     doc["timezone_offset"]  = cfg.timezone_offset;
 

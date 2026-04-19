@@ -80,6 +80,13 @@ private:
     uint32_t _lastNotifyMs = 0;
     static constexpr uint32_t kStaleNotifyMs = 600000UL;   // 10 min
 
+    // Pool failover: 0 = primary (pool_url/port), 1 = secondary.  Increments
+    // _connectFails on TCP/subscribe failure; after kMaxConnectFails we swap
+    // to the other pool (if configured).  Reset on successful connect.
+    uint8_t _poolIndex    = 0;
+    uint8_t _connectFails = 0;
+    static constexpr uint8_t kMaxConnectFails = 3;
+
     // Pending share submissions (non-blocking): we fire-and-forget the submit
     // line, then read the response on a later mine() iteration. A small FIFO
     // avoids losing accept/reject counts when several shares land close together.

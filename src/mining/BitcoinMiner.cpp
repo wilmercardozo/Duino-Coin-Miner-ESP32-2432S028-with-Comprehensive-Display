@@ -63,13 +63,47 @@ bool BitcoinMiner::connect() {
     // Seed the notify watchdog now — otherwise it would fire ~10 min after
     // boot even on a healthy pool, before the first notify ever arrived.
     _lastNotifyMs = millis();
-    Serial.printf("[btc] Connecting to %s:%d\n", _cfg.pool_url, _cfg.pool_port);
-    if (!_client.connect(_cfg.pool_url, _cfg.pool_port)) {
+
+    // Select active pool.  Secondary is only used if _poolIndex == 1 AND it
+    // was configured; otherwise fall back to primary transparently.
+    const char* host = _cfg.pool_url;
+    uint16_t    port = _cfg.pool_port;
+    if (_poolIndex == 1 && _cfg.pool_url2[0] != '\0' && _cfg.pool_port2 != 0) {
+        host = _cfg.pool_url2;
+        port = _cfg.pool_port2;
+    } else {
+        _poolIndex = 0;
+    }
+    // Reflect active pool in the stats block so the UI shows what we're on.
+    char shortUrl[58];
+    strlcpy(shortUrl, host, sizeof(shortUrl));
+    snprintf(_stats.poolUrl, sizeof(_stats.poolUrl), "%s:%d", shortUrl, port);
+
+    Serial.printf("[btc] Connecting to %s:%d (pool %u)\n", host, port, _poolIndex);
+    if (!_client.connect(host, port)) {
         Serial.println("[btc] TCP connect failed");
+        _connectFails++;
+        if (_connectFails >= kMaxConnectFails &&
+            _cfg.pool_url2[0] != '\0' && _cfg.pool_port2 != 0) {
+            _poolIndex = _poolIndex ? 0 : 1;
+            _connectFails = 0;
+            Serial.printf("[btc] failover -> pool %u\n", _poolIndex);
+        }
         return false;
     }
     _client.setTimeout(10);
-    return _sendSubscribe() && _sendAuthorize();
+    if (_sendSubscribe() && _sendAuthorize()) {
+        _connectFails = 0;
+        return true;
+    }
+    _connectFails++;
+    if (_connectFails >= kMaxConnectFails &&
+        _cfg.pool_url2[0] != '\0' && _cfg.pool_port2 != 0) {
+        _poolIndex = _poolIndex ? 0 : 1;
+        _connectFails = 0;
+        Serial.printf("[btc] failover -> pool %u\n", _poolIndex);
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
