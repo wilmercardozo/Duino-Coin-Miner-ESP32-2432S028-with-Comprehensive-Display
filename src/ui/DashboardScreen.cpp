@@ -1,6 +1,7 @@
 #include "DashboardScreen.h"
 #include <lvgl.h>
 #include <cstdio>
+#include <WiFi.h>
 
 #define COL_BG      lv_color_hex(0x080c14)
 #define COL_ORANGE  lv_color_hex(0xff6b35)
@@ -10,6 +11,8 @@
 #define COL_SUBTLE  lv_color_hex(0x1a2035)
 
 static lv_obj_t* s_scr         = nullptr;
+static lv_obj_t* s_lblTitle    = nullptr;
+static lv_obj_t* s_lblWifi     = nullptr;
 static lv_obj_t* s_gaugeArc    = nullptr;
 static lv_obj_t* s_lblHashrate = nullptr;
 static lv_obj_t* s_lblShares   = nullptr;
@@ -54,12 +57,18 @@ void DashboardScreen::create() {
     lv_obj_set_style_pad_all(s_scr, 0, 0);
     lv_obj_set_style_border_width(s_scr, 0, 0);
 
-    // Topbar
-    lv_obj_t* topbar = lv_label_create(s_scr);
-    lv_label_set_text(topbar, LV_SYMBOL_WIFI " NerdDuino Pro");
-    lv_obj_set_style_text_color(topbar, COL_ORANGE, 0);
-    lv_obj_set_style_text_font(topbar, &lv_font_montserrat_14, 0);
-    lv_obj_align(topbar, LV_ALIGN_TOP_LEFT, 8, 4);
+    // Topbar — title left, WiFi signal right
+    s_lblTitle = lv_label_create(s_scr);
+    lv_label_set_text(s_lblTitle, "NerdDuino Pro");
+    lv_obj_set_style_text_color(s_lblTitle, COL_ORANGE, 0);
+    lv_obj_set_style_text_font(s_lblTitle, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_lblTitle, LV_ALIGN_TOP_LEFT, 8, 4);
+
+    s_lblWifi = lv_label_create(s_scr);
+    lv_label_set_text(s_lblWifi, LV_SYMBOL_WIFI " --");
+    lv_obj_set_style_text_color(s_lblWifi, lv_color_hex(0x64748b), 0);
+    lv_obj_set_style_text_font(s_lblWifi, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_lblWifi, LV_ALIGN_TOP_RIGHT, -8, 4);
 
     // Gauge arc (130x130, top-left area)
     s_gaugeArc = lv_arc_create(s_scr);
@@ -155,5 +164,22 @@ void DashboardScreen::update(const MiningStats& stats) {
     // Sparkline: push new hashrate datapoint every update call
     if (s_series) {
         lv_chart_set_next_value(s_chart, s_series, (int32_t)stats.hashrate);
+    }
+
+    // WiFi signal — bars + dBm, colour by quality
+    if (s_lblWifi) {
+        if (WiFi.status() == WL_CONNECTED) {
+            int rssi = WiFi.RSSI();
+            lv_color_t col;
+            if      (rssi >= -60) col = COL_GREEN;
+            else if (rssi >= -75) col = COL_AMBER;
+            else                  col = lv_color_hex(0xef4444);
+            snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", rssi);
+            lv_obj_set_style_text_color(s_lblWifi, col, 0);
+            lv_label_set_text(s_lblWifi, buf);
+        } else {
+            lv_obj_set_style_text_color(s_lblWifi, lv_color_hex(0xef4444), 0);
+            lv_label_set_text(s_lblWifi, LV_SYMBOL_WIFI " --");
+        }
     }
 }

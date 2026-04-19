@@ -27,6 +27,15 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
   .btn { background:#ff6b35; color:white; }
   .btn:hover { background:#ea580c; }
   #duco-fields, #btc-fields { display:none; }
+  .net-list { max-height:180px; overflow-y:auto; background:#0f172a; border:1px solid #334155; border-radius:6px; margin-bottom:8px; }
+  .net-item { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #1e293b; font-size:13px; }
+  .net-item:hover { background:#334155; }
+  .net-item:last-child { border-bottom:0; }
+  .bars { font-family:monospace; color:#4ade80; letter-spacing:-1px; }
+  .bars.weak { color:#fbbf24; }
+  .bars.bad  { color:#ef4444; }
+  .lock { margin-right:4px; opacity:0.6; font-size:11px; }
+  .hint { font-size:11px; color:#64748b; padding:8px 10px; text-align:center; }
 </style>
 </head>
 <body class="min-h-screen flex items-center justify-center p-4">
@@ -37,8 +46,9 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
     <p class="text-xs uppercase tracking-widest text-gray-500 mb-2">WiFi</p>
     <div class="flex gap-2 mb-2">
       <input id="ssid" name="wifi_ssid" placeholder="Red WiFi" class="flex-1 rounded p-2 text-sm" required>
-      <button type="button" onclick="scanWifi()" class="px-3 py-2 text-xs rounded border border-gray-600 text-gray-300">Buscar</button>
+      <button type="button" id="scan-btn" onclick="scanWifi()" class="px-3 py-2 text-xs rounded border border-gray-600 text-gray-300">Buscar</button>
     </div>
+    <div id="nets" class="net-list hidden"></div>
     <input id="pass" name="wifi_pass" type="password" placeholder="Contrasena" class="w-full rounded p-2 text-sm mb-4">
 
     <p class="text-xs uppercase tracking-widest text-gray-500 mb-2">Algoritmo</p>
@@ -77,12 +87,39 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
     document.getElementById('duco-fields').style.display = v==0?'block':'none';
     document.getElementById('btc-fields').style.display  = v==1?'block':'none';
   }
+  function bars(rssi){
+    // -50 or better = 4 bars, -60 = 3, -70 = 2, -80 = 1, else 0
+    const n = rssi >= -50 ? 4 : rssi >= -60 ? 3 : rssi >= -70 ? 2 : rssi >= -80 ? 1 : 0;
+    const cls = n >= 3 ? '' : n == 2 ? 'weak' : 'bad';
+    return '<span class="bars '+cls+'">'+'\u2588'.repeat(n)+'\u2591'.repeat(4-n)+'</span>';
+  }
   function scanWifi(){
+    const list = document.getElementById('nets');
+    const btn = document.getElementById('scan-btn');
+    btn.textContent = '...';
+    btn.disabled = true;
+    list.classList.remove('hidden');
+    list.innerHTML = '<div class="hint">Buscando redes...</div>';
     fetch('/scan').then(r=>r.json()).then(nets=>{
-      const s=document.getElementById('ssid');
-      s.value = nets[0]?.ssid || s.value;
-      alert('Redes:\n'+nets.map(n=>n.ssid+' ('+n.rssi+'dBm)').join('\n'));
+      btn.textContent = 'Buscar';
+      btn.disabled = false;
+      if (!nets.length) { list.innerHTML = '<div class="hint">No se encontraron redes</div>'; return; }
+      nets.sort((a,b)=>b.rssi-a.rssi);
+      list.innerHTML = nets.map(n=>{
+        const lock = n.secure ? '<span class="lock">&#128274;</span>' : '';
+        return '<div class="net-item" onclick="pickSsid(\''+n.ssid.replace(/'/g,"\\'")+'\')">' +
+               '<span>'+lock+n.ssid+'</span>'+bars(n.rssi)+'</div>';
+      }).join('');
+    }).catch(()=>{
+      btn.textContent = 'Buscar';
+      btn.disabled = false;
+      list.innerHTML = '<div class="hint">Error al escanear</div>';
     });
+  }
+  function pickSsid(s){
+    document.getElementById('ssid').value = s;
+    document.getElementById('nets').classList.add('hidden');
+    document.getElementById('pass').focus();
   }
   document.getElementById('form').onsubmit=function(e){
     e.preventDefault();
@@ -112,11 +149,14 @@ void ConfigPortal::start() {
         int n = WiFi.scanNetworks();
         JsonDocument doc;
         JsonArray arr = doc.to<JsonArray>();
-        for (int i = 0; i < n && i < 10; i++) {
+        for (int i = 0; i < n && i < 15; i++) {
+            if (WiFi.SSID(i).length() == 0) continue;   // skip hidden
             JsonObject obj = arr.add<JsonObject>();
-            obj["ssid"] = WiFi.SSID(i);
-            obj["rssi"] = (int)WiFi.RSSI(i);
+            obj["ssid"]   = WiFi.SSID(i);
+            obj["rssi"]   = (int)WiFi.RSSI(i);
+            obj["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
         }
+        WiFi.scanDelete();
         String json;
         serializeJson(doc, json);
         req->send(200, "application/json", json);

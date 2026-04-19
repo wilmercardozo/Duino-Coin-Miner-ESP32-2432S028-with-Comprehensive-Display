@@ -138,8 +138,14 @@ void loop()
 
     static unsigned long s_lastUpdate = 0;
     unsigned long now = millis();
-    if (gMiner && (now - s_lastUpdate >= 1000)) {
+    if (now - s_lastUpdate >= 1000) {
         s_lastUpdate = now;
-        UIManager::update(gMiner->getStats());
+        if (gMiner) {
+            UIManager::update(gMiner->getStats());
+        } else {
+            MiningStats idle;
+            idle.uptimeSeconds = now / 1000;
+            UIManager::update(idle);
+        }
     }
 }
