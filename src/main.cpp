@@ -3,8 +3,34 @@
 #include "Config.h"
 #include "config/ConfigStore.h"
 #include "network/WiFiManager.h"
+#include "mining/IMiningAlgorithm.h"
+#include "mining/DuinoCoinMiner.h"
 
 Config gConfig;
+
+static IMiningAlgorithm* gMiner = nullptr;
+
+static void taskMining(void* param) {
+    IMiningAlgorithm* miner = (IMiningAlgorithm*)param;
+    if (!miner->connect()) {
+        Serial.println("[mining] connect() failed");
+        vTaskDelete(nullptr);
+        return;
+    }
+    for (;;) {
+        miner->mine();
+    }
+}
+
+void startMining() {
+    if (gConfig.algorithm == Algorithm::DUINOCOIN) {
+        gMiner = new DuinoCoinMiner(gConfig);
+    }
+    // Bitcoin case added in Task 6
+    if (gMiner) {
+        xTaskCreatePinnedToCore(taskMining, "mining", 8192, gMiner, 5, nullptr, 1);
+    }
+}
 
 void setup() {
     Serial.begin(115200);
@@ -27,6 +53,10 @@ void setup() {
     if (WiFiMgr::needsPortal()) {
         Serial.println("[boot] WiFi failed — entering portal");
         // Portal start placeholder
+    }
+
+    if (WiFiMgr::isConnected() && !WiFiMgr::needsPortal()) {
+        startMining();
     }
 }
 
