@@ -144,10 +144,12 @@ void setup()
 
     startUI();  // always init display before any branching
 
-    bool hasConfig = ConfigStore::load(gConfig);
+    bool hasConfig   = ConfigStore::load(gConfig);
+    bool forcePortal = ConfigStore::isForcePortal();   // one-shot; clears flag
 
-    if (!hasConfig) {
-        Serial.println("[boot] No config — entering portal");
+    if (!hasConfig || forcePortal) {
+        Serial.printf("[boot] Entering portal (hasConfig=%d forcePortal=%d)\n",
+                      hasConfig, forcePortal);
         gInPortalMode = true;
         ConfigPortal::start();
         return;

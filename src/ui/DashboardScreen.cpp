@@ -122,20 +122,27 @@ void DashboardScreen::create() {
     s_series = lv_chart_add_series(s_chart, COL_ORANGE, LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 10);
 
-    // Nav dots — current view = filled orange pill, next view = grey dot
-    lv_obj_t* dot1 = lv_obj_create(s_scr);
-    lv_obj_set_size(dot1, 14, 5);
-    lv_obj_set_style_bg_color(dot1, COL_ORANGE, 0);
-    lv_obj_set_style_radius(dot1, 3, 0);
-    lv_obj_set_style_border_width(dot1, 0, 0);
-    lv_obj_align(dot1, LV_ALIGN_BOTTOM_MID, -12, -2);
+    // Nav dots — 3 positions; this view (Dashboard = 0) is the leftmost pill.
+    lv_obj_t* d0 = lv_obj_create(s_scr);
+    lv_obj_set_size(d0, 14, 5);
+    lv_obj_set_style_bg_color(d0, COL_ORANGE, 0);
+    lv_obj_set_style_radius(d0, 3, 0);
+    lv_obj_set_style_border_width(d0, 0, 0);
+    lv_obj_align(d0, LV_ALIGN_BOTTOM_MID, -18, -2);
 
-    lv_obj_t* dot2 = lv_obj_create(s_scr);
-    lv_obj_set_size(dot2, 5, 5);
-    lv_obj_set_style_bg_color(dot2, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(dot2, 3, 0);
-    lv_obj_set_style_border_width(dot2, 0, 0);
-    lv_obj_align(dot2, LV_ALIGN_BOTTOM_MID, 6, -2);
+    lv_obj_t* d1 = lv_obj_create(s_scr);
+    lv_obj_set_size(d1, 5, 5);
+    lv_obj_set_style_bg_color(d1, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_radius(d1, 3, 0);
+    lv_obj_set_style_border_width(d1, 0, 0);
+    lv_obj_align(d1, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+    lv_obj_t* d2 = lv_obj_create(s_scr);
+    lv_obj_set_size(d2, 5, 5);
+    lv_obj_set_style_bg_color(d2, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_radius(d2, 3, 0);
+    lv_obj_set_style_border_width(d2, 0, 0);
+    lv_obj_align(d2, LV_ALIGN_BOTTOM_MID, 12, -2);
 }
 
 void DashboardScreen::load() {

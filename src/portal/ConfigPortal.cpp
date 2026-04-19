@@ -26,7 +26,8 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
   .accent { color:#ff6b35; }
   .btn { background:#ff6b35; color:white; }
   .btn:hover { background:#ea580c; }
-  #duco-fields, #btc-fields { display:none; }
+  .algo-card { background:#0f172a; border:1px solid #334155; border-radius:6px; padding:10px; margin-bottom:10px; }
+  .algo-head { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#94a3b8; margin-bottom:6px; }
   .net-list { max-height:180px; overflow-y:auto; background:#0f172a; border:1px solid #334155; border-radius:6px; margin-bottom:8px; }
   .net-item { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; cursor:pointer; border-bottom:1px solid #1e293b; font-size:13px; }
   .net-item:hover { background:#334155; }
@@ -51,17 +52,20 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
     <div id="nets" class="net-list hidden"></div>
     <input id="pass" name="wifi_pass" type="password" placeholder="Contrasena" class="w-full rounded p-2 text-sm mb-4">
 
-    <p class="text-xs uppercase tracking-widest text-gray-500 mb-2">Algoritmo</p>
-    <div class="flex gap-4 mb-4 text-sm">
-      <label><input type="radio" name="algorithm" value="0" onchange="showAlgo(0)" checked class="mr-1">DuinoCoin</label>
-      <label><input type="radio" name="algorithm" value="1" onchange="showAlgo(1)" class="mr-1">Bitcoin</label>
+    <p class="text-xs uppercase tracking-widest text-gray-500 mb-2">Algoritmo activo al iniciar</p>
+    <div class="flex gap-4 mb-3 text-sm">
+      <label><input type="radio" name="algorithm" value="0" checked class="mr-1">DuinoCoin</label>
+      <label><input type="radio" name="algorithm" value="1" class="mr-1">Bitcoin</label>
     </div>
+    <p class="text-xs text-gray-500 mb-3">Puedes llenar ambos; el rig guardara las credenciales de los dos y podras alternar desde la pantalla Config.</p>
 
-    <div id="duco-fields" class="mb-4">
+    <div class="algo-card">
+      <div class="algo-head">DuinoCoin</div>
       <input name="duco_user" placeholder="Usuario DuinoCoin" class="w-full rounded p-2 text-sm mb-2">
       <input name="duco_key"  placeholder="Mining Key (opcional)" class="w-full rounded p-2 text-sm">
     </div>
-    <div id="btc-fields" class="mb-4">
+    <div class="algo-card">
+      <div class="algo-head">Bitcoin</div>
       <input name="btc_address" placeholder="Direccion Bitcoin (bc1q...)" class="w-full rounded p-2 text-sm mb-2">
       <input name="pool_url"    placeholder="Pool URL" value="public-pool.io" class="w-full rounded p-2 text-sm mb-2">
       <input name="pool_port"   placeholder="Puerto" value="21496" type="number" class="w-full rounded p-2 text-sm">
@@ -82,11 +86,6 @@ static const char PORTAL_HTML[] PROGMEM = R"rawliteral(
   <p id="msg" class="text-center text-sm mt-4 hidden"></p>
 </div>
 <script>
-  showAlgo(0);
-  function showAlgo(v){
-    document.getElementById('duco-fields').style.display = v==0?'block':'none';
-    document.getElementById('btc-fields').style.display  = v==1?'block':'none';
-  }
   function bars(rssi){
     // -50 or better = 4 bars, -60 = 3, -70 = 2, -80 = 1, else 0
     const n = rssi >= -50 ? 4 : rssi >= -60 ? 3 : rssi >= -70 ? 2 : rssi >= -80 ? 1 : 0;

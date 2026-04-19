@@ -1,6 +1,7 @@
 #include "UIManager.h"
 #include "DashboardScreen.h"
 #include "ClockScreen.h"
+#include "ConfigScreen.h"
 
 #include <TFT_eSPI.h>
 #include <lvgl.h>
@@ -25,8 +26,8 @@ static uint32_t        s_lastFlush   = 0;
 static bool     s_pressing   = false;
 static uint32_t s_pressStart = 0;
 
-// view management (0 = Dashboard, 1 = Clock)
-static constexpr uint8_t kViewCount = 2;
+// view management (0 = Dashboard, 1 = Clock, 2 = Config)
+static constexpr uint8_t kViewCount = 3;
 static uint8_t s_curView = 0;
 
 // ── TFT_eSPI flush callback ───────────────────────────────────────────────────
@@ -47,10 +48,11 @@ static void flushCb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map)
 static void switchView(uint8_t view)
 {
     s_curView = view;
-    if (s_curView == 0) {
-        DashboardScreen::load();
-    } else {
-        ClockScreen::load();
+    switch (s_curView) {
+        case 0:  DashboardScreen::load(); break;
+        case 1:  ClockScreen::load();     break;
+        case 2:  ConfigScreen::load();    break;
+        default: DashboardScreen::load(); break;
     }
 }
 
@@ -79,6 +81,7 @@ void init()
     // 4. Build screens (stubs for now; real content in Task 8/9)
     DashboardScreen::create();
     ClockScreen::create();
+    ConfigScreen::create();
     DashboardScreen::load();
 }
 
@@ -95,6 +98,7 @@ void tick()
             taskEXIT_CRITICAL(&gMiningSnapshot.mux);
             DashboardScreen::update(snapshot);
             ClockScreen::update(snapshot);
+            ConfigScreen::update(snapshot);
         }
         lv_timer_handler();
         s_lastFlush = now;
@@ -133,13 +137,16 @@ void handleTouch(int16_t x, int16_t y, bool pressed)
         } else if (dur < 500u) {
             // short tap — left/right zone navigation
             if (x < 32) {
-                // previous view
                 uint8_t next = (s_curView == 0) ? (kViewCount - 1) : (s_curView - 1);
                 switchView(next);
             } else if (x > 288) {
-                // next view
                 uint8_t next = (s_curView + 1) % kViewCount;
                 switchView(next);
+            } else if (s_curView == 2) {
+                // Middle tap on Config view — let the screen decide which
+                // button (if any) was hit.  Other views don't have tappable
+                // content, so middle taps there are no-ops.
+                ConfigScreen::handleTap(x, y);
             }
         }
     }

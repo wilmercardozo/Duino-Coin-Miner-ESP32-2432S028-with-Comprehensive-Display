@@ -2,7 +2,8 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 
-static const char* PATH = "/config.json";
+static const char* PATH              = "/config.json";
+static const char* PATH_FORCE_PORTAL = "/force_portal";
 
 bool ConfigStore::exists() {
     return LittleFS.exists(PATH);
@@ -36,6 +37,17 @@ bool ConfigStore::load(Config& out) {
                     ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
     out.valid = true;
     return true;
+}
+
+bool ConfigStore::isForcePortal() {
+    if (!LittleFS.exists(PATH_FORCE_PORTAL)) return false;
+    LittleFS.remove(PATH_FORCE_PORTAL);   // one-shot: clear after reading
+    return true;
+}
+
+void ConfigStore::setForcePortal() {
+    File f = LittleFS.open(PATH_FORCE_PORTAL, "w");
+    if (f) { f.print("1"); f.close(); }
 }
 
 bool ConfigStore::save(const Config& cfg) {
