@@ -1,4 +1,5 @@
 #include "ClockScreen.h"
+#include "TopBar.h"
 #include <lvgl.h>
 #include <Arduino.h>
 #include <time.h>
@@ -10,6 +11,7 @@
 #define COL_SUBTLE  lv_color_hex(0x1a2035)
 
 static lv_obj_t* s_scr        = nullptr;
+static TopBar    s_topBar;
 static lv_obj_t* s_lblTime    = nullptr;
 static lv_obj_t* s_lblDate    = nullptr;
 static lv_obj_t* s_lblHash    = nullptr;
@@ -50,12 +52,7 @@ void ClockScreen::create()
     lv_obj_set_style_pad_all(s_scr, 0, 0);
     lv_obj_set_style_border_width(s_scr, 0, 0);
 
-    // ── Topbar ────────────────────────────────────────────────────────────────
-    lv_obj_t* top = lv_label_create(s_scr);
-    lv_label_set_text(top, LV_SYMBOL_WIFI "  NerdDuino Pro");
-    lv_obj_set_style_text_color(top, COL_ORANGE, 0);
-    lv_obj_set_style_text_font(top, &lv_font_montserrat_14, 0);
-    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 8, 6);
+    s_topBar.create(s_scr, "NerdDuino Pro");
 
     // ── Large clock (Montserrat 36, white) ────────────────────────────────────
     s_lblTime = lv_label_create(s_scr);
@@ -87,10 +84,15 @@ void ClockScreen::create()
                           LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
 
-    s_lblHash   = makeCell(strip,  80, "0 kH/s", COL_ORANGE,             "Hashrate");
-    s_lblPool   = makeCell(strip, 110, "pool...", lv_color_hex(0xe2e8f0), "Pool");
-    s_lblPing   = makeCell(strip,  70, "--ms",    COL_GREEN,              "Ping");
-    s_lblShares = makeCell(strip,  60, "0",       lv_color_hex(0xe2e8f0), "Shares");
+    s_lblHash   = makeCell(strip,  70, "0 kH/s", COL_ORANGE,             "Hashrate");
+    s_lblPool   = makeCell(strip, 130, "pool...", lv_color_hex(0xe2e8f0), "Pool");
+    s_lblPing   = makeCell(strip,  50, "--ms",    COL_GREEN,              "Ping");
+    s_lblShares = makeCell(strip,  40, "0",       lv_color_hex(0xe2e8f0), "Shares");
+
+    // Pool URL may overflow the cell — use circular scroll so it stays readable.
+    lv_obj_set_width(s_lblPool, 124);
+    lv_label_set_long_mode(s_lblPool, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(s_lblPool, LV_TEXT_ALIGN_CENTER, 0);
 
     // ── Nav dots: left (Dashboard) = gray, right (this view) = orange pill ───
     lv_obj_t* dot1 = lv_obj_create(s_scr);
@@ -148,4 +150,6 @@ void ClockScreen::update(const MiningStats& stats)
 
     snprintf(buf, sizeof(buf), "%u", (unsigned)stats.sharesAccepted);
     lv_label_set_text(s_lblShares, buf);
+
+    s_topBar.update();
 }

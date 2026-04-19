@@ -1,7 +1,7 @@
 #include "DashboardScreen.h"
+#include "TopBar.h"
 #include <lvgl.h>
 #include <cstdio>
-#include <WiFi.h>
 
 #define COL_BG      lv_color_hex(0x080c14)
 #define COL_ORANGE  lv_color_hex(0xff6b35)
@@ -11,8 +11,7 @@
 #define COL_SUBTLE  lv_color_hex(0x1a2035)
 
 static lv_obj_t* s_scr         = nullptr;
-static lv_obj_t* s_lblTitle    = nullptr;
-static lv_obj_t* s_lblWifi     = nullptr;
+static TopBar    s_topBar;
 static lv_obj_t* s_gaugeArc    = nullptr;
 static lv_obj_t* s_lblHashrate = nullptr;
 static lv_obj_t* s_lblShares   = nullptr;
@@ -57,18 +56,7 @@ void DashboardScreen::create() {
     lv_obj_set_style_pad_all(s_scr, 0, 0);
     lv_obj_set_style_border_width(s_scr, 0, 0);
 
-    // Topbar — title left, WiFi signal right
-    s_lblTitle = lv_label_create(s_scr);
-    lv_label_set_text(s_lblTitle, "NerdDuino Pro");
-    lv_obj_set_style_text_color(s_lblTitle, COL_ORANGE, 0);
-    lv_obj_set_style_text_font(s_lblTitle, &lv_font_montserrat_14, 0);
-    lv_obj_align(s_lblTitle, LV_ALIGN_TOP_LEFT, 8, 4);
-
-    s_lblWifi = lv_label_create(s_scr);
-    lv_label_set_text(s_lblWifi, LV_SYMBOL_WIFI " --");
-    lv_obj_set_style_text_color(s_lblWifi, lv_color_hex(0x64748b), 0);
-    lv_obj_set_style_text_font(s_lblWifi, &lv_font_montserrat_14, 0);
-    lv_obj_align(s_lblWifi, LV_ALIGN_TOP_RIGHT, -8, 4);
+    s_topBar.create(s_scr, "NerdDuino Pro");
 
     // Gauge arc (130x130, top-left area)
     s_gaugeArc = lv_arc_create(s_scr);
@@ -93,7 +81,7 @@ void DashboardScreen::create() {
     lv_obj_set_style_text_color(s_lblHashrate, COL_ORANGE, 0);
     lv_obj_set_style_text_font(s_lblHashrate, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(s_lblHashrate, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_lblHashrate, LV_ALIGN_TOP_LEFT, 28, 64);
+    lv_obj_align_to(s_lblHashrate, s_gaugeArc, LV_ALIGN_CENTER, 0, 0);
 
     // 2x2 grid of stat cards, right side
     s_lblShares  = makeCard(s_scr, LV_ALIGN_TOP_RIGHT,  -8,   22, "Shares OK", COL_GREEN);
@@ -101,19 +89,22 @@ void DashboardScreen::create() {
     s_lblBalance = makeCard(s_scr, LV_ALIGN_TOP_RIGHT, -100,  22, "Balance",   COL_ORANGE);
     s_lblUptime  = makeCard(s_scr, LV_ALIGN_TOP_RIGHT, -100,  76, "Uptime",    COL_BLUE);
 
-    // 60-second sparkline chart (full width, bottom area)
+    // 60-second sparkline chart (full width, bottom area).  Line type + auto
+    // Y-scaling keeps the curve visible whether we're at 5 kH/s or 1 MH/s.
     s_chart = lv_chart_create(s_scr);
     lv_obj_set_size(s_chart, 304, 44);
     lv_obj_align(s_chart, LV_ALIGN_BOTTOM_MID, 0, -18);
-    lv_chart_set_type(s_chart, LV_CHART_TYPE_BAR);
+    lv_chart_set_type(s_chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(s_chart, 60);
     lv_chart_set_div_line_count(s_chart, 0, 0);
     lv_obj_set_style_bg_color(s_chart, COL_BG, 0);
     lv_obj_set_style_border_width(s_chart, 0, 0);
     lv_obj_set_style_pad_all(s_chart, 0, 0);
     lv_obj_set_style_bg_opa(s_chart, LV_OPA_COVER, 0);
+    lv_obj_set_style_line_width(s_chart, 2, LV_PART_ITEMS);
+    lv_obj_set_style_size(s_chart, 0, 0, LV_PART_INDICATOR);   // hide point dots
     s_series = lv_chart_add_series(s_chart, COL_ORANGE, LV_CHART_AXIS_PRIMARY_Y);
-    lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 300);
+    lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 10);
 
     // Nav dots — current view = filled orange pill, next view = grey dot
     lv_obj_t* dot1 = lv_obj_create(s_scr);
@@ -161,25 +152,14 @@ void DashboardScreen::update(const MiningStats& stats) {
     snprintf(buf, sizeof(buf), "%ud %uh", (unsigned)d, (unsigned)h);
     lv_label_set_text(s_lblUptime, buf);
 
-    // Sparkline: push new hashrate datapoint every update call
+    // Sparkline: push new hashrate datapoint every update call and rescale
+    // the Y axis so the curve always fills the available height.
     if (s_series) {
         lv_chart_set_next_value(s_chart, s_series, (int32_t)stats.hashrate);
+        int32_t yMax = (int32_t)(s_maxHashrate * 1.2f);
+        if (yMax < 10) yMax = 10;
+        lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, yMax);
     }
 
-    // WiFi signal — bars + dBm, colour by quality
-    if (s_lblWifi) {
-        if (WiFi.status() == WL_CONNECTED) {
-            int rssi = WiFi.RSSI();
-            lv_color_t col;
-            if      (rssi >= -60) col = COL_GREEN;
-            else if (rssi >= -75) col = COL_AMBER;
-            else                  col = lv_color_hex(0xef4444);
-            snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", rssi);
-            lv_obj_set_style_text_color(s_lblWifi, col, 0);
-            lv_label_set_text(s_lblWifi, buf);
-        } else {
-            lv_obj_set_style_text_color(s_lblWifi, lv_color_hex(0xef4444), 0);
-            lv_label_set_text(s_lblWifi, LV_SYMBOL_WIFI " --");
-        }
-    }
+    s_topBar.update();
 }
