@@ -1,0 +1,6 @@
+.superpowers/
+.pio/
+.vscode/
+*.bin
+*.elf
+*.map
