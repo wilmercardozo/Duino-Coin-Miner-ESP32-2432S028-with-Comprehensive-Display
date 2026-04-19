@@ -61,7 +61,7 @@ void init()
 {
     // 1. Hardware init
     s_tft.init();
-    s_tft.setRotation(1);   // landscape
+    s_tft.setRotation(3);   // landscape for ESP32-2432S028R (was 1, caused portrait output)
 
     // 2. LVGL init
     lv_init();
