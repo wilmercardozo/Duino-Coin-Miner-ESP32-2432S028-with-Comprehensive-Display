@@ -22,6 +22,7 @@ static bool parseConfigJson(const char* json, Config& out) {
     strlcpy(out.wifi_ssid,   doc["wifi_ssid"]   | "", sizeof(out.wifi_ssid));
     strlcpy(out.wifi_pass,   doc["wifi_pass"]   | "", sizeof(out.wifi_pass));
     strlcpy(out.duco_user,   doc["duco_user"]   | "", sizeof(out.duco_user));
+    strlcpy(out.duco_key,    doc["duco_key"]    | "", sizeof(out.duco_key));
     strlcpy(out.btc_address, doc["btc_address"] | "", sizeof(out.btc_address));
     strlcpy(out.pool_url,    doc["pool_url"]    | "public-pool.io", sizeof(out.pool_url));
     out.pool_port       = doc["pool_port"]       | 21496;
