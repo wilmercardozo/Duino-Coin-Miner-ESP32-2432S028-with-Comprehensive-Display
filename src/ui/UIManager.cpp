@@ -2,6 +2,7 @@
 #include "DashboardScreen.h"
 #include "ClockScreen.h"
 #include "ConfigScreen.h"
+#include "SplashScreen.h"
 
 #include <TFT_eSPI.h>
 #include <lvgl.h>
@@ -78,11 +79,13 @@ void init()
                            sizeof(s_lvBuf),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // 4. Build screens (stubs for now; real content in Task 8/9)
+    // 4. Build screens — splash first so setup() can show it immediately,
+    //    real views come after.
+    SplashScreen::create();
     DashboardScreen::create();
     ClockScreen::create();
     ConfigScreen::create();
-    DashboardScreen::load();
+    SplashScreen::load();
 }
 
 void tick()
@@ -150,6 +153,35 @@ void handleTouch(int16_t x, int16_t y, bool pressed)
             }
         }
     }
+}
+
+void pumpLvgl(uint32_t ms)
+{
+    // Called from setup() on core 1 before the UI task exists.  Simply spins
+    // lv_timer_handler() on ~16 ms cadence so animations/transitions render.
+    uint32_t start = millis();
+    while (millis() - start < ms) {
+        lv_timer_handler();
+        delay(16);
+    }
+}
+
+void showRestarting(const char* msg)
+{
+    // Paint a clear "restarting" state then reboot.
+    //
+    // Threading: LVGL is not thread-safe, but screen-load + label-set are
+    // single-word writes in practice.  We take two paths:
+    //  - Called from core 0 (UI task): the UI task would normally drive
+    //    lv_timer_handler itself, but we're inside its own callstack, so
+    //    we pump LVGL manually to render the change.
+    //  - Called from core 1 (loopTask / mining): the UI task on core 0
+    //    is free to render; we just mutate labels and sleep.
+    SplashScreen::load();
+    SplashScreen::setStatus(msg ? msg : "Reiniciando...");
+    if (xPortGetCoreID() == 0) pumpLvgl(700);
+    else                        delay(700);
+    ESP.restart();
 }
 
 } // namespace UIManager

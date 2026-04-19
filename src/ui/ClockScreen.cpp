@@ -158,5 +158,5 @@ void ClockScreen::update(const MiningStats& stats)
     snprintf(buf, sizeof(buf), "%u", (unsigned)stats.sharesAccepted);
     lv_label_set_text(s_lblShares, buf);
 
-    s_topBar.update();
+    s_topBar.update(stats.algorithm);
 }

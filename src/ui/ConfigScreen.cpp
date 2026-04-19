@@ -1,5 +1,6 @@
 #include "ConfigScreen.h"
 #include "TopBar.h"
+#include "UIManager.h"
 #include "Config.h"
 #include "config/ConfigStore.h"
 #include <lvgl.h>
@@ -159,7 +160,9 @@ void ConfigScreen::update(const MiningStats& stats)
         lv_label_set_text(s_lblInfoIp, buf);
     }
 
-    s_topBar.update();
+    // Derive algo from gConfig (stats.algorithm may be "" if miner not started)
+    const char* algo = (gConfig.algorithm == Algorithm::BITCOIN) ? "BTC" : "DUCO";
+    s_topBar.update(algo);
 }
 
 void ConfigScreen::handleTap(int16_t x, int16_t y)
@@ -176,22 +179,21 @@ void ConfigScreen::handleTap(int16_t x, int16_t y)
                     Serial.printf("[config] algorithm -> %s, saving and restarting\n",
                                   gConfig.algorithm == Algorithm::BITCOIN ? "BTC" : "DUCO");
                     ConfigStore::save(gConfig);
-                    delay(200);
-                    ESP.restart();
+                    UIManager::showRestarting(gConfig.algorithm == Algorithm::BITCOIN
+                                              ? "Cambiando a BTC..."
+                                              : "Cambiando a DUCO...");
                     break;
                 }
                 case 1: {   // open portal, preserving current config
                     Serial.println("[config] set force-portal flag, restarting");
                     ConfigStore::setForcePortal();
-                    delay(200);
-                    ESP.restart();
+                    UIManager::showRestarting("Abriendo portal...");
                     break;
                 }
                 case 2: {   // wipe everything
                     Serial.println("[config] erase + restart requested");
                     ConfigStore::erase();
-                    delay(200);
-                    ESP.restart();
+                    UIManager::showRestarting("Borrando configuracion...");
                     break;
                 }
             }

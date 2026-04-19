@@ -218,5 +218,5 @@ void DashboardScreen::update(const MiningStats& stats) {
         lv_chart_set_range(s_chart, LV_CHART_AXIS_PRIMARY_Y, 0, yMax);
     }
 
-    s_topBar.update();
+    s_topBar.update(stats.algorithm);
 }

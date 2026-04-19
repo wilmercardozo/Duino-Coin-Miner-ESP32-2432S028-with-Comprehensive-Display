@@ -7,6 +7,8 @@
 #include "mining/DuinoCoinMiner.h"
 #include "mining/BitcoinMiner.h"
 #include "ui/UIManager.h"
+#include "ui/SplashScreen.h"
+#include "ui/DashboardScreen.h"
 #include "portal/ConfigPortal.h"
 #include "portal/OTAHandler.h"
 #include <XPT2046_Touchscreen.h>
@@ -47,12 +49,18 @@ static void taskUI(void*)
     }
 }
 
-void startUI()
+static void startUI()
 {
     UIManager::init();
     s_touchSPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, -1);
     s_touch.begin(s_touchSPI);
     s_touch.setRotation(1);
+    // Task NOT created here — setup() drives LVGL manually during boot
+    // (splash status transitions) then calls startUITask() at the end.
+}
+
+static void startUITask()
+{
     xTaskCreatePinnedToCore(taskUI, "ui", 8192, nullptr, 2, nullptr, 0);
 }
 
@@ -144,7 +152,10 @@ void setup()
         Serial.println("[boot] LittleFS mount failed");
     }
 
-    startUI();  // always init display before any branching
+    startUI();   // init display + build screens; task UI not yet running
+    SplashScreen::load();
+    SplashScreen::setStatus("Iniciando...");
+    UIManager::pumpLvgl(300);
 
     bool hasConfig   = ConfigStore::load(gConfig);
     bool forcePortal = ConfigStore::isForcePortal();   // one-shot; clears flag
@@ -153,27 +164,52 @@ void setup()
         Serial.printf("[boot] Entering portal (hasConfig=%d forcePortal=%d)\n",
                       hasConfig, forcePortal);
         gInPortalMode = true;
+        SplashScreen::setStatus(forcePortal
+            ? "Modo portal (solicitado)"
+            : "Sin configuracion - portal");
+        UIManager::pumpLvgl(200);
         ConfigPortal::start();
+        startUITask();
         return;
     }
 
+    SplashScreen::setStatus("Conectando WiFi...");
+    UIManager::pumpLvgl(100);
     WiFiMgr::connect(gConfig);
 
     if (WiFiMgr::needsPortal()) {
         Serial.println("[boot] WiFi failed — entering portal");
         gInPortalMode = true;
+        SplashScreen::setStatus("WiFi fallo - portal");
+        UIManager::pumpLvgl(200);
         ConfigPortal::start();
+        startUITask();
         return;
     }
 
     if (WiFiMgr::isConnected()) {
+        SplashScreen::setStatus("Sincronizando hora...");
+        UIManager::pumpLvgl(100);
         configTime((long)gConfig.timezone_offset * 3600, 0,
                    "pool.ntp.org", "time.nist.gov");
         Serial.println("[ntp] Sync started");
+
+        SplashScreen::setStatus("Preparando OTA...");
+        UIManager::pumpLvgl(100);
         OTAHandler::init(gConfig.rig_name);
         WiFiMgr::startAutoReconnect(gConfig);
+
+        SplashScreen::setStatus("Iniciando minero...");
+        UIManager::pumpLvgl(100);
         startMining();
+
+        SplashScreen::setStatus("Listo!");
+        UIManager::pumpLvgl(400);
     }
+
+    DashboardScreen::load();   // queue transition to dashboard
+    UIManager::pumpLvgl(250);  // render the slide animation before UI task takes over
+    startUITask();
 }
 
 void loop()
@@ -186,8 +222,7 @@ void loop()
     if (gPortalRequested) {
         gPortalRequested = false;
         ConfigStore::erase();  // erase config so next boot enters portal cleanly
-        delay(100);
-        ESP.restart();         // clean reboot — avoids WiFi mode conflict mid-mining
+        UIManager::showRestarting("Abriendo portal...");
     }
 
     static unsigned long s_lastUpdate = 0;
