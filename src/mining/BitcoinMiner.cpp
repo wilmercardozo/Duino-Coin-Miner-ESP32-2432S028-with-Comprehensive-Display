@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // NerdDuino Pro — Bitcoin Stratum V1 miner implementation
-// Ported from NMMiner architecture; mbedTLS SHA-256d (Apache-2.0)
+// Hash core: nerdSHA256plus (Apache-2.0, NerdMiner_v2 / Blockstream Jade lineage)
 #pragma GCC optimize("-O2")
 #include "BitcoinMiner.h"
 #include <Arduino.h>
@@ -8,6 +8,16 @@
 #include "mbedtls/sha256.h"
 
 #define MINER_VERSION "NerdDuino/1.0"
+
+// ---------------------------------------------------------------------------
+// Local one-shot double-SHA256 used only by _prepareJob() (merkle root).
+// The mining hot path uses nerd_sha256d() with a cached midstate instead.
+// ---------------------------------------------------------------------------
+static void doubleSha256Once(const uint8_t* data, size_t len, uint8_t* out32) {
+    uint8_t tmp[32];
+    mbedtls_sha256(data, len, tmp, 0);
+    mbedtls_sha256(tmp, 32, out32, 0);
+}
 
 BitcoinMiner::BitcoinMiner(const Config& cfg) : _cfg(cfg) {
     strlcpy(_stats.algorithm, "BTC", sizeof(_stats.algorithm));
@@ -19,15 +29,6 @@ BitcoinMiner::BitcoinMiner(const Config& cfg) : _cfg(cfg) {
 }
 
 BitcoinMiner::~BitcoinMiner() { disconnect(); }
-
-// ---------------------------------------------------------------------------
-// Double-SHA256 using mbedTLS (built into ESP-IDF, Apache-2.0)
-// ---------------------------------------------------------------------------
-void BitcoinMiner::_doubleSha256(const uint8_t* data, size_t len, uint8_t* out32) {
-    uint8_t tmp[32];
-    mbedtls_sha256(data, len, tmp, 0);
-    mbedtls_sha256(tmp, 32, out32, 0);
-}
 
 // ---------------------------------------------------------------------------
 // connect() — TCP connect, subscribe, authorize
@@ -74,10 +75,6 @@ bool BitcoinMiner::_sendSubscribe() {
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// _parseSubscribeResponse() — extract extranonce1 + extranonce2_size
-// {"id":1,"result":[[...],extranonce1,extranonce2_size],"error":null}
-// ---------------------------------------------------------------------------
 bool BitcoinMiner::_parseSubscribeResponse(const String& line) {
     JsonDocument doc;
     if (deserializeJson(doc, line) != DeserializationError::Ok) return false;
@@ -90,9 +87,6 @@ bool BitcoinMiner::_parseSubscribeResponse(const String& line) {
     return strlen(_extranonce1) > 0;
 }
 
-// ---------------------------------------------------------------------------
-// _sendAuthorize() — Stratum mining.authorize (worker = address.rig_name)
-// ---------------------------------------------------------------------------
 bool BitcoinMiner::_sendAuthorize() {
     char worker[128];
     snprintf(worker, sizeof(worker), "%s.%s", _cfg.btc_address, _cfg.rig_name);
@@ -109,8 +103,6 @@ bool BitcoinMiner::_sendAuthorize() {
 
 // ---------------------------------------------------------------------------
 // _parseNotify() — extract mining.notify job parameters
-// {"id":null,"method":"mining.notify","params":[jobId,prevHash,coinb1,coinb2,
-//   [merkle],version,nbits,ntime,cleanJobs]}
 // ---------------------------------------------------------------------------
 bool BitcoinMiner::_parseNotify(const String& line) {
     JsonDocument doc;
@@ -123,7 +115,6 @@ bool BitcoinMiner::_parseNotify(const String& line) {
     strlcpy(_coinb1,   p[2] | "", sizeof(_coinb1));
     strlcpy(_coinb2,   p[3] | "", sizeof(_coinb2));
 
-    // Issue 2: validate coinbase buffers were not silently truncated
     if (strlen(_coinb1) >= 1023 || strlen(_coinb2) >= 1023) {
         Serial.println("[btc] WARNING: coinbase too large — job skipped");
         _jobReady = false;
@@ -143,7 +134,6 @@ bool BitcoinMiner::_parseNotify(const String& line) {
     if (cleanJobs) _jobNonce = 0;
     _hasJob = true;
 
-    // Issue 1: pre-compute the merkle root and cache nbits once per job
     _prepareJob();
     return true;
 }
@@ -172,17 +162,14 @@ void BitcoinMiner::_bytesToHex(const uint8_t* in, size_t len, char* out) {
 }
 
 // ---------------------------------------------------------------------------
-// _prepareJob() — compute merkle root and cache nbits once per new job.
-// Called at the end of _parseNotify(); result is stored in _merkleRoot and
-// _cachedBits so that _buildBlockHeader() and _meetsTarget() are cheap.
+// _prepareJob() — build merkleRoot, compute midstate of bytes 0..63, and
+// cache bytes 64..75 into _tailBuf so the inner loop only writes the nonce.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::_prepareJob() {
     _jobReady = false;
-
-    // Issue 3: cache nbits so _meetsTarget() never calls strtoul per nonce
     _cachedBits = strtoul(_nbits, nullptr, 16);
 
-    // Build coinbase hex: coinb1 + extranonce1 + extranonce2(zeros) + coinb2
+    // --- Build coinbase hex: coinb1 + extranonce1 + extranonce2(zeros) + coinb2
     char extranonce2[32] = {};
     int en2HexLen = _extranonce2Size * 2;
     if (en2HexLen >= (int)sizeof(extranonce2))
@@ -190,7 +177,6 @@ void BitcoinMiner::_prepareJob() {
     memset(extranonce2, '0', (size_t)en2HexLen);
     extranonce2[en2HexLen] = '\0';
 
-    // Compute total coinbase byte length from hex lengths
     size_t cbHexLen = strlen(_coinb1) + strlen(_extranonce1)
                     + (size_t)en2HexLen + strlen(_coinb2);
     size_t cbLen    = cbHexLen / 2;
@@ -200,8 +186,6 @@ void BitcoinMiner::_prepareJob() {
         Serial.println("[btc] _prepareJob: malloc failed — job skipped");
         return;
     }
-
-    // Decode coinbase hex pieces into cbBytes without building a heap String
     size_t offset = 0;
     size_t c1Len  = strlen(_coinb1)       / 2;
     size_t en1Len = strlen(_extranonce1)  / 2;
@@ -213,102 +197,104 @@ void BitcoinMiner::_prepareJob() {
     _hexToBytes(extranonce2,  cbBytes + offset, en2Len); offset += en2Len;
     _hexToBytes(_coinb2,      cbBytes + offset, c2Len);
 
-    // Double-SHA256 the coinbase transaction
     uint8_t cbHash[32];
-    _doubleSha256(cbBytes, cbLen, cbHash);
+    doubleSha256Once(cbBytes, cbLen, cbHash);
     free(cbBytes);
 
-    // Apply merkle branches: root = SHA256d(current || branch)
     for (int i = 0; i < _merkleCount; i++) {
         uint8_t branchBytes[32] = {};
         _hexToBytes(_merkle[i], branchBytes, 32);
         uint8_t concat[64];
         memcpy(concat,      cbHash,      32);
         memcpy(concat + 32, branchBytes, 32);
-        _doubleSha256(concat, 64, cbHash);
+        doubleSha256Once(concat, 64, cbHash);
     }
-
     memcpy(_merkleRoot, cbHash, 32);
 
-    // Pre-build bytes 0..75 of the block header; only nonce (76..79) varies.
-    // 1. Version — little-endian 32-bit
+    // --- Assemble the full 80-byte block header in a temp buffer
+    uint8_t header[80] = {};
     uint32_t version = strtoul(_version, nullptr, 16);
-    _headerTemplate[0] = (uint8_t)(version & 0xFF);
-    _headerTemplate[1] = (uint8_t)((version >> 8)  & 0xFF);
-    _headerTemplate[2] = (uint8_t)((version >> 16) & 0xFF);
-    _headerTemplate[3] = (uint8_t)((version >> 24) & 0xFF);
-    // 2. Previous block hash — word-reversed to network order
+    header[0] = (uint8_t)(version & 0xFF);
+    header[1] = (uint8_t)((version >> 8)  & 0xFF);
+    header[2] = (uint8_t)((version >> 16) & 0xFF);
+    header[3] = (uint8_t)((version >> 24) & 0xFF);
+
     uint8_t prevHashBytes[32] = {};
     _hexToBytes(_prevHash, prevHashBytes, 32);
     for (int i = 0; i < 8; i++) {
-        _headerTemplate[4 + i*4 + 0] = prevHashBytes[i*4 + 3];
-        _headerTemplate[4 + i*4 + 1] = prevHashBytes[i*4 + 2];
-        _headerTemplate[4 + i*4 + 2] = prevHashBytes[i*4 + 1];
-        _headerTemplate[4 + i*4 + 3] = prevHashBytes[i*4 + 0];
+        header[4 + i*4 + 0] = prevHashBytes[i*4 + 3];
+        header[4 + i*4 + 1] = prevHashBytes[i*4 + 2];
+        header[4 + i*4 + 2] = prevHashBytes[i*4 + 1];
+        header[4 + i*4 + 3] = prevHashBytes[i*4 + 0];
     }
-    // 3. Merkle root
-    memcpy(_headerTemplate + 36, _merkleRoot, 32);
-    // 4. Timestamp — little-endian 32-bit
+    memcpy(header + 36, _merkleRoot, 32);
+
     uint32_t t = strtoul(_ntime, nullptr, 16);
-    _headerTemplate[68] = (uint8_t)(t & 0xFF);
-    _headerTemplate[69] = (uint8_t)((t >> 8)  & 0xFF);
-    _headerTemplate[70] = (uint8_t)((t >> 16) & 0xFF);
-    _headerTemplate[71] = (uint8_t)((t >> 24) & 0xFF);
-    // 5. Bits (encoded target) — little-endian 32-bit
-    _headerTemplate[72] = (uint8_t)(_cachedBits & 0xFF);
-    _headerTemplate[73] = (uint8_t)((_cachedBits >> 8)  & 0xFF);
-    _headerTemplate[74] = (uint8_t)((_cachedBits >> 16) & 0xFF);
-    _headerTemplate[75] = (uint8_t)((_cachedBits >> 24) & 0xFF);
+    header[68] = (uint8_t)(t & 0xFF);
+    header[69] = (uint8_t)((t >> 8)  & 0xFF);
+    header[70] = (uint8_t)((t >> 16) & 0xFF);
+    header[71] = (uint8_t)((t >> 24) & 0xFF);
+
+    header[72] = (uint8_t)(_cachedBits & 0xFF);
+    header[73] = (uint8_t)((_cachedBits >> 8)  & 0xFF);
+    header[74] = (uint8_t)((_cachedBits >> 16) & 0xFF);
+    header[75] = (uint8_t)((_cachedBits >> 24) & 0xFF);
+    // bytes 76..79 = nonce (zero here; filled by inner loop via _tailBuf)
+
+    // --- Compute midstate over bytes 0..63 once; cache tail 64..79 for reuse
+    nerd_mids(_midstate.digest, header);
+    memcpy(_tailBuf, header + 64, 16);   // _tailBuf[12..15] will carry the nonce
 
     _jobReady = true;
 }
 
 // ---------------------------------------------------------------------------
-// _buildBlockHeader() — copy the pre-computed 76-byte template and write nonce.
-// All constants (version, prevHash, merkleRoot, ntime, bits) are baked into
-// _headerTemplate by _prepareJob(). This inner-loop function is allocation-free
-// and performs no hex parsing — the hot path is just memcpy + 4 byte writes.
-// ---------------------------------------------------------------------------
-void BitcoinMiner::_buildBlockHeader(uint32_t nonce, uint8_t* header80) {
-    memcpy(header80, _headerTemplate, 76);
-    header80[76] = (uint8_t)(nonce & 0xFF);
-    header80[77] = (uint8_t)((nonce >> 8)  & 0xFF);
-    header80[78] = (uint8_t)((nonce >> 16) & 0xFF);
-    header80[79] = (uint8_t)((nonce >> 24) & 0xFF);
-}
-
-// ---------------------------------------------------------------------------
-// _meetsTarget() — check if hash satisfies the nbits-encoded target.
-// Uses _cachedBits (set once per job) — no strtoul per nonce.
-// The hash (SHA256d output) is in internal byte order; Bitcoin valid hashes
-// have a value numerically less than the target when interpreted as big-endian.
-// We reverse the 32-byte result to compare most-significant byte first.
+// _meetsTarget() — check whether the double-SHA256 hash satisfies the
+// nbits-encoded target.  Bitcoin's hash-vs-target comparison treats the
+// 32-byte digest as a 256-bit little-endian integer: byte 31 is the MSByte
+// and byte 0 is the LSByte.  The nerd_sha256d() early-exit check at A[7]
+// already filters bytes 30..31 = 0 (diff ≥ 1), so any hash that reaches
+// this function is a real candidate — we do the full numeric compare here
+// to avoid submitting low-diff shares that the pool would just reject.
 // ---------------------------------------------------------------------------
 bool BitcoinMiner::_meetsTarget(const uint8_t* hash32) {
-    // Issue 3: use pre-cached bits — no strtoul call here
     uint8_t  exp      = (uint8_t)(_cachedBits >> 24);
     uint32_t mantissa = _cachedBits & 0x00FFFFFFu;
 
-    // Build 32-byte target (big-endian)
+    // Build target in LE byte order: target_int = mantissa << (8 * (exp - 3))
     uint8_t target[32] = {};
-    if (exp >= 1 && exp <= 32) {
-        int bytePos = 32 - (int)exp;
-        if (bytePos + 0 >= 0 && bytePos + 0 < 32) target[bytePos + 0] = (uint8_t)((mantissa >> 16) & 0xFF);
-        if (bytePos + 1 >= 0 && bytePos + 1 < 32) target[bytePos + 1] = (uint8_t)((mantissa >> 8)  & 0xFF);
-        if (bytePos + 2 >= 0 && bytePos + 2 < 32) target[bytePos + 2] = (uint8_t)( mantissa        & 0xFF);
+    if (exp >= 3 && exp <= 32) {
+        target[exp - 3] = (uint8_t)( mantissa        & 0xFF);
+        target[exp - 2] = (uint8_t)((mantissa >>  8) & 0xFF);
+        target[exp - 1] = (uint8_t)((mantissa >> 16) & 0xFF);
     }
 
-    // SHA256d output is little-endian; reverse to compare as big-endian
-    uint8_t rev[32];
-    for (int i = 0; i < 32; i++) rev[i] = hash32[31 - i];
-
-    return memcmp(rev, target, 32) < 0;
+    // Compare as LE 256-bit integers: walk from MSByte (index 31) down.
+    for (int i = 31; i >= 0; i--) {
+        if (hash32[i] < target[i]) return true;
+        if (hash32[i] > target[i]) return false;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
-// _submitShare() — send mining.submit to pool
+// _submitShare() — fire-and-forget: queue id, write request, return.  The
+// pool's accept/reject line is consumed by _handleSubmitResponse() on the
+// next mine() iteration.  This removes the 5-second blocking read that
+// used to freeze the hash loop right after every share.
 // ---------------------------------------------------------------------------
-bool BitcoinMiner::_submitShare(uint32_t nonce) {
+void BitcoinMiner::_submitShare(uint32_t nonce) {
+    // find a free slot (drop oldest silently if full — pool will just re-reject)
+    int slot = -1;
+    for (int i = 0; i < kMaxPending; i++) {
+        if (!_pending[i].inFlight) { slot = i; break; }
+    }
+    if (slot < 0) slot = 0;   // overwrite slot 0 rather than lose the submit
+
+    uint32_t id = _nextSubmitId++;
+    _pending[slot].id       = id;
+    _pending[slot].inFlight = true;
+
     char nonceBuf[16];
     snprintf(nonceBuf, sizeof(nonceBuf), "%08lx", (unsigned long)nonce);
 
@@ -322,61 +308,59 @@ bool BitcoinMiner::_submitShare(uint32_t nonce) {
     char worker[128];
     snprintf(worker, sizeof(worker), "%s.%s", _cfg.btc_address, _cfg.rig_name);
 
-    String req = "{\"id\":4,\"method\":\"mining.submit\",\"params\":[\"";
-    req += worker;
-    req += "\",\""; req += _jobId;
-    req += "\",\""; req += extranonce2;
-    req += "\",\""; req += _ntime;
-    req += "\",\""; req += nonceBuf;
-    req += "\"]}\n";
+    char req[320];
+    snprintf(req, sizeof(req),
+        "{\"id\":%lu,\"method\":\"mining.submit\",\"params\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]}\n",
+        (unsigned long)id, worker, _jobId, extranonce2, _ntime, nonceBuf);
     _client.print(req);
-    Serial.printf("[btc] Share submitted — nonce=%s\n", nonceBuf);
 
-    // Read pool response to determine accept/reject
-    String resp;
-    if (_readLine(resp, 5000)) {
-        // Accepted: {"id":4,"result":true,"error":null}
-        // Rejected: {"id":4,"result":null,"error":[21,...]}  or result:false
-        bool accepted = (resp.indexOf("\"result\":true") >= 0);
-        if (accepted) {
-            _stats.sharesAccepted++;
-            Serial.println("[btc] Share accepted");
-        } else {
-            _stats.sharesRejected++;
-            Serial.printf("[btc] Share rejected: %s\n", resp.c_str());
-        }
-    } else {
-        // Timeout reading response — count as rejected to avoid silent loss
-        _stats.sharesRejected++;
-        Serial.println("[btc] Share response timeout — counted as rejected");
-    }
-    return true;
+    Serial.printf("[btc] Share submitted — id=%lu nonce=%s\n", (unsigned long)id, nonceBuf);
 }
 
 // ---------------------------------------------------------------------------
-// mine() — main loop: drain incoming messages then hash a batch
+// _handleSubmitResponse() — match a {"id":N,"result":...} line to an in-flight
+// share and update accepted/rejected counters accordingly.
+// ---------------------------------------------------------------------------
+void BitcoinMiner::_handleSubmitResponse(const String& line) {
+    JsonDocument doc;
+    if (deserializeJson(doc, line) != DeserializationError::Ok) return;
+    if (doc["id"].isNull()) return;
+    uint32_t id = doc["id"] | 0u;
+    if (id < 10) return;   // not one of our submits
+
+    int slot = -1;
+    for (int i = 0; i < kMaxPending; i++) {
+        if (_pending[i].inFlight && _pending[i].id == id) { slot = i; break; }
+    }
+    if (slot < 0) return;  // response for an already-forgotten id
+
+    bool accepted = doc["result"].is<bool>() && (doc["result"].as<bool>());
+    if (accepted) {
+        _stats.sharesAccepted++;
+        Serial.printf("[btc] Share %lu accepted\n", (unsigned long)id);
+    } else {
+        _stats.sharesRejected++;
+        Serial.printf("[btc] Share %lu rejected: %s\n", (unsigned long)id, line.c_str());
+    }
+    _pending[slot].inFlight = false;
+}
+
+// ---------------------------------------------------------------------------
+// mine() — drain pool messages, then hash a batch using midstate
 // ---------------------------------------------------------------------------
 void BitcoinMiner::mine() {
-    // Drain incoming pool messages (new jobs, difficulty updates, responses)
+    // Drain incoming pool messages: new jobs, difficulty updates, share responses.
     while (_client.available()) {
         String line;
-        if (_readLine(line, 100)) {
-            if (line.indexOf("mining.notify") >= 0) {
-                if (_parseNotify(line)) {
-                    Serial.printf("[btc] New job: %s\n", _jobId);
-                }
-            }
-            // mining.set_difficulty and responses are silently consumed for now
+        if (!_readLine(line, 100)) break;
+        if (line.indexOf("mining.notify") >= 0) {
+            if (_parseNotify(line)) Serial.printf("[btc] New job: %s\n", _jobId);
+        } else if (line.indexOf("\"result\"") >= 0) {
+            _handleSubmitResponse(line);
         }
     }
 
-    if (!_hasJob) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        return;
-    }
-
-    // Issue 1: guard — skip hashing until merkle root is ready for this job
-    if (!_jobReady) {
+    if (!_hasJob || !_jobReady) {
         vTaskDelay(pdMS_TO_TICKS(100));
         return;
     }
@@ -390,39 +374,40 @@ void BitcoinMiner::mine() {
         return;
     }
 
-    // Hash a batch of nonces; yield periodically to satisfy RTOS watchdog
-    uint8_t   header[80];
-    uint32_t  hashCount = 0;
-    uint32_t  startMs   = millis();
+    // --- hash loop: yield every 1024 nonces and update hashrate on each yield
+    uint32_t startMs   = millis();
+    uint32_t hashCount = 0;
     const uint32_t BATCH_SIZE = 10000;
+    uint8_t hash[32];
 
     for (uint32_t i = 0; i < BATCH_SIZE; i++) {
         uint32_t nonce = _jobNonce++;
-        _buildBlockHeader(nonce, header);
+        _tailBuf[12] = (uint8_t)(nonce & 0xFF);
+        _tailBuf[13] = (uint8_t)((nonce >> 8)  & 0xFF);
+        _tailBuf[14] = (uint8_t)((nonce >> 16) & 0xFF);
+        _tailBuf[15] = (uint8_t)((nonce >> 24) & 0xFF);
 
-        uint8_t hash[32];
-        _doubleSha256(header, 80, hash);
+        bool maybe = nerd_sha256d(&_midstate, _tailBuf, hash);
         hashCount++;
 
-        if (_meetsTarget(hash)) {
+        if (maybe && _meetsTarget(hash)) {
             _submitShare(nonce);
         }
 
-        // Yield every 1024 hashes to keep the RTOS watchdog happy
         if ((i & 0x3FFu) == 0x3FFu) {
+            // Update stats every 1024 hashes so the UI doesn't see a stale
+            // value mid-batch when a share or a difficulty change lands.
+            uint32_t elapsed = millis() - startMs;
+            if (elapsed > 0) _stats.hashrate = (float)hashCount / (float)elapsed;
             vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
 
-    // Update hashrate: hashCount H in elapsed ms  →  kH/s (H/ms == kH/s)
     uint32_t elapsed = millis() - startMs;
-    if (elapsed > 0) {
-        _stats.hashrate      = (float)hashCount / (float)elapsed;
-        _stats.uptimeSeconds = (millis() - _startMs) / 1000;
-    }
+    if (elapsed > 0) _stats.hashrate = (float)hashCount / (float)elapsed;
+    _stats.uptimeSeconds = (millis() - _startMs) / 1000;
     _totalHashes += hashCount;
 
-    // Heartbeat log every 30s so we can tell the miner is alive
     uint32_t now = millis();
     if (now - _lastReportMs > 30000UL) {
         Serial.printf("[btc] hr=%.1f kH/s total=%lu nonce=%lu accepted=%lu rejected=%lu\n",
@@ -435,9 +420,6 @@ void BitcoinMiner::mine() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// getStats() / disconnect()
-// ---------------------------------------------------------------------------
 MiningStats BitcoinMiner::getStats() {
     _stats.uptimeSeconds = (millis() - _startMs) / 1000;
     return _stats;
@@ -447,4 +429,5 @@ void BitcoinMiner::disconnect() {
     if (_client.connected()) _client.stop();
     _hasJob   = false;
     _jobReady = false;
+    for (int i = 0; i < kMaxPending; i++) _pending[i].inFlight = false;
 }

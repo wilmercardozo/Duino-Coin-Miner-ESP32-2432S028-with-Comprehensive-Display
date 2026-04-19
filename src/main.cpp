@@ -72,6 +72,17 @@ static void taskMining(void* param)
     }
 }
 
+// Periodic balance refresh — low-priority task on core 0.  Runs forever,
+// polling the miner's public balance API (DUCO only; BTC is no-op).  Kept
+// separate from the mining task so the TLS round-trip can't stall hashing.
+static void taskBalance(void*)
+{
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(60000));   // 60 s
+        if (gMiner) gMiner->fetchBalance();
+    }
+}
+
 void startMining()
 {
     if (gConfig.algorithm == Algorithm::DUINOCOIN) {
@@ -92,6 +103,10 @@ void startMining()
     }
     if (gMiner) {
         xTaskCreatePinnedToCore(taskMining, "mining", 8192, gMiner, 5, nullptr, 1);
+        // 4 KB is enough for the balance task (Arduino-ESP32's HTTPS stack
+        // uses its own heap; the task mostly waits).  Low priority (1) and
+        // pinned to core 0 to avoid stealing cycles from mining on core 1.
+        xTaskCreatePinnedToCore(taskBalance, "balance", 6144, nullptr, 1, nullptr, 0);
     }
 }
 
@@ -130,6 +145,7 @@ void setup()
                    "pool.ntp.org", "time.nist.gov");
         Serial.println("[ntp] Sync started");
         OTAHandler::init(gConfig.rig_name);
+        WiFiMgr::startAutoReconnect(gConfig);
         startMining();
     }
 }

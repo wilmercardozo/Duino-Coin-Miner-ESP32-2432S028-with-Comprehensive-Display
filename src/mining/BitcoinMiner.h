@@ -4,6 +4,7 @@
 #pragma once
 #include "IMiningAlgorithm.h"
 #include "Config.h"
+#include "nerdSHA256plus.h"
 #include <WiFiClient.h>
 
 class BitcoinMiner : public IMiningAlgorithm {
@@ -37,16 +38,27 @@ private:
     int  _extranonce2Size   = 4;
     bool _hasJob            = false;
 
-    // Per-job cached values (computed once in _prepareJob, reused every nonce)
-    uint8_t  _merkleRoot[32] = {};
-    uint32_t _cachedBits     = 0;
-    bool     _jobReady       = false;
-    // Full 80-byte header template: bytes 0..75 are constant per job,
-    // _buildBlockHeader() just copies this and writes the nonce at 76..79.
-    uint8_t  _headerTemplate[80] = {};
+    // Per-job cached values — midstate approach (nerdSHA256plus):
+    // nerd_mids() computes SHA256 state after the first 64 bytes of the header
+    // (version + prevHash + first 28 B of merkleRoot) once per job.  For every
+    // nonce we only run nerd_sha256d() on the 16 remaining bytes.
+    nerdSHA256_context _midstate     = {};
+    uint8_t            _tailBuf[16]  = {};  // bytes 64..79 of header; nonce in [12..15]
+    uint8_t            _merkleRoot[32] = {};
+    uint32_t           _cachedBits     = 0;
+    bool               _jobReady       = false;
+
     // Periodic hashrate report
     uint32_t _lastReportMs   = 0;
     uint32_t _totalHashes    = 0;
+
+    // Pending share submissions (non-blocking): we fire-and-forget the submit
+    // line, then read the response on a later mine() iteration. A small FIFO
+    // avoids losing accept/reject counts when several shares land close together.
+    struct PendingShare { uint32_t id; bool inFlight; };
+    static constexpr int kMaxPending = 4;
+    PendingShare _pending[kMaxPending] = {};
+    uint32_t     _nextSubmitId         = 10;   // Stratum ids 1..9 reserved
 
     bool _sendSubscribe();
     bool _sendAuthorize();
@@ -54,10 +66,9 @@ private:
     bool _parseNotify(const String& line);
     bool _parseSubscribeResponse(const String& line);
     void _prepareJob();
-    void _buildBlockHeader(uint32_t nonce, uint8_t* header80);
-    void _doubleSha256(const uint8_t* data, size_t len, uint8_t* out32);
     bool _meetsTarget(const uint8_t* hash32);
-    bool _submitShare(uint32_t nonce);
+    void _submitShare(uint32_t nonce);        // now async: queues + returns
+    void _handleSubmitResponse(const String& line);
     void _hexToBytes(const char* hex, uint8_t* out, size_t maxBytes);
     void _bytesToHex(const uint8_t* in, size_t len, char* out);
 };

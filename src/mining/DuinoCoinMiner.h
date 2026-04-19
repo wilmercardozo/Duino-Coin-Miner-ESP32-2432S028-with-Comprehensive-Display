@@ -12,6 +12,7 @@ public:
     void mine()             override;
     MiningStats getStats()  override;
     void disconnect()       override;
+    void fetchBalance()     override;   // hits /users/<user> on the DUCO REST API
 
 private:
     const Config& _cfg;

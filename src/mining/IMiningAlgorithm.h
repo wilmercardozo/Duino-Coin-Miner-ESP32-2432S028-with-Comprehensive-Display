@@ -19,4 +19,8 @@ public:
     virtual void mine()               = 0;   // called in tight loop
     virtual MiningStats getStats()    = 0;
     virtual void disconnect()         = 0;
+
+    // Optional: fetch current wallet balance from the coin's public API.
+    // Default no-op (e.g. Stratum BTC pools don't expose a balance concept).
+    virtual void fetchBalance() {}
 };

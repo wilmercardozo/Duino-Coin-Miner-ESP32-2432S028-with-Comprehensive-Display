@@ -617,3 +617,47 @@ void DuinoCoinMiner::_updateHashrate(uint32_t hashCount, uint32_t elapsedMs) {
     // hashrate in kH/s
     _stats.hashrate = (float)hashCount / (float)elapsedMs;  // H/ms = kH/s
 }
+
+// ---------------------------------------------------------------------------
+// fetchBalance() — query https://server.duinocoin.com/users/<user> and
+// update _stats.balance from the JSON result.  Called from a low-priority
+// balance task spawned in main.cpp, NOT from the hash loop, so blocking
+// TLS reads don't stall mining.
+// ---------------------------------------------------------------------------
+void DuinoCoinMiner::fetchBalance() {
+    if (WiFi.status() != WL_CONNECTED)   return;
+    if (_cfg.duco_user[0] == '\0')       return;
+
+    WiFiClientSecure sc;
+    sc.setInsecure();
+    sc.setTimeout(5000);
+
+    HTTPClient https;
+    https.setTimeout(5000);
+    https.setReuse(false);
+
+    char url[128];
+    snprintf(url, sizeof(url),
+             "https://server.duinocoin.com/users/%s", _cfg.duco_user);
+
+    if (!https.begin(sc, url)) return;
+
+    int code = https.GET();
+    if (code != HTTP_CODE_OK) {
+        https.end();
+        return;
+    }
+
+    String payload = https.getString();
+    https.end();
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) return;
+
+    // Response shape: { "success": true, "result": { "balance": { "balance": 1.23, ... }, ... } }
+    JsonVariant bal = doc["result"]["balance"]["balance"];
+    if (bal.is<float>() || bal.is<double>() || bal.is<int>()) {
+        _stats.balance = bal.as<float>();
+    }
+}
