@@ -93,7 +93,9 @@
 #define LV_DISPLAY_ROTATE_270   3
 
 /* Logging */
-#define LV_USE_LOG      0
+#define LV_USE_LOG      1
+#define LV_LOG_LEVEL    LV_LOG_LEVEL_WARN
+#define LV_LOG_PRINTF   1
 #define LV_USE_ASSERT_NULL          0
 #define LV_USE_ASSERT_MALLOC        0
 #define LV_USE_ASSERT_STYLE         0
@@ -133,13 +135,13 @@
 #define LV_FONT_MONTSERRAT_18 0
 #define LV_FONT_MONTSERRAT_20 0
 #define LV_FONT_MONTSERRAT_22 0
-#define LV_FONT_MONTSERRAT_24 0
+#define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_MONTSERRAT_26 0
 #define LV_FONT_MONTSERRAT_28 0
 #define LV_FONT_MONTSERRAT_30 0
 #define LV_FONT_MONTSERRAT_32 0
 #define LV_FONT_MONTSERRAT_34 0
-#define LV_FONT_MONTSERRAT_36 0
+#define LV_FONT_MONTSERRAT_36 1
 #define LV_FONT_MONTSERRAT_38 0
 #define LV_FONT_MONTSERRAT_40 0
 #define LV_FONT_MONTSERRAT_42 0
@@ -169,7 +171,7 @@
 #define LV_USE_BUTTONMATRIX 1
 #define LV_USE_CALENDAR    0
 #define LV_USE_CANVAS      1
-#define LV_USE_CHART       0
+#define LV_USE_CHART       1
 #define LV_USE_CHECKBOX    1
 #define LV_USE_DROPDOWN    1
 #define LV_USE_IMAGE       1

@@ -77,8 +77,8 @@ lib_deps =
     lvgl/lvgl@^9.2.0
     bodmer/TFT_eSPI@^2.5.43
     bblanchon/ArduinoJson@^7.0.0
-    me-no-dev/ESP Async WebServer@^1.2.3
-    me-no-dev/AsyncTCP@^1.1.1
+    mathieucarbou/ESP Async WebServer@^3.0.6
+    ESP32Async/AsyncTCP@^3.3.2
 
 build_flags =
     ; TFT_eSPI — CYD ESP32-2432S028 pins (avoids editing User_Setup_Select.h)
