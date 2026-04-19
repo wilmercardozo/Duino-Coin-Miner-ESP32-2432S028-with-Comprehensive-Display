@@ -2,6 +2,7 @@
 #include <LittleFS.h>
 #include "Config.h"
 #include "config/ConfigStore.h"
+#include "network/WiFiManager.h"
 
 Config gConfig;
 
@@ -9,15 +10,23 @@ void setup() {
     Serial.begin(115200);
     Serial.println("[boot] NerdDuino Pro starting");
 
-    if (!LittleFS.begin(true)) {  // true = format on fail
+    if (!LittleFS.begin(true)) {
         Serial.println("[boot] LittleFS mount failed");
     }
 
-    if (ConfigStore::load(gConfig)) {
-        Serial.printf("[boot] Config loaded — algo=%d wifi=%s\n",
-                      (int)gConfig.algorithm, gConfig.wifi_ssid);
-    } else {
-        Serial.println("[boot] No config found — portal needed");
+    bool hasConfig = ConfigStore::load(gConfig);
+
+    if (!hasConfig) {
+        Serial.println("[boot] No config — entering portal");
+        // Portal will be started in Task 10; placeholder for now
+        return;
+    }
+
+    WiFiMgr::connect(gConfig);
+
+    if (WiFiMgr::needsPortal()) {
+        Serial.println("[boot] WiFi failed — entering portal");
+        // Portal start placeholder
     }
 }
 
