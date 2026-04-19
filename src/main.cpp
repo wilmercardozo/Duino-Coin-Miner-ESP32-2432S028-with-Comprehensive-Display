@@ -5,6 +5,7 @@
 #include "network/WiFiManager.h"
 #include "mining/IMiningAlgorithm.h"
 #include "mining/DuinoCoinMiner.h"
+#include "mining/BitcoinMiner.h"
 
 Config gConfig;
 
@@ -25,8 +26,9 @@ static void taskMining(void* param) {
 void startMining() {
     if (gConfig.algorithm == Algorithm::DUINOCOIN) {
         gMiner = new DuinoCoinMiner(gConfig);
+    } else {
+        gMiner = new BitcoinMiner(gConfig);
     }
-    // Bitcoin case added in Task 6
     if (gMiner) {
         xTaskCreatePinnedToCore(taskMining, "mining", 8192, gMiner, 5, nullptr, 1);
     }
