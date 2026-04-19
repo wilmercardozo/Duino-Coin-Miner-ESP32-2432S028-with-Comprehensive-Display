@@ -11,6 +11,7 @@
 #include "ui/DashboardScreen.h"
 #include "portal/ConfigPortal.h"
 #include "portal/OTAHandler.h"
+#include "portal/StatsServer.h"
 #include <XPT2046_Touchscreen.h>
 #include <SPI.h>
 
@@ -209,6 +210,7 @@ void setup()
         SplashScreen::setStatus("Preparando OTA...");
         UIManager::pumpLvgl(100);
         OTAHandler::init(gConfig.rig_name);
+        StatsServer::init(&gMiner);
         WiFiMgr::startAutoReconnect(gConfig);
 
         SplashScreen::setStatus("Iniciando minero...");
