@@ -260,6 +260,9 @@ void BitcoinMiner::_prepareJob() {
     if (_jobMutex) xSemaphoreTake(_jobMutex, portMAX_DELAY);
     nerd_mids(_midstate.digest, header);
     memcpy(_tailBuf, header + 64, 16);   // _tailBuf[12..15] will carry the nonce
+    // Pre-compute the nonce-independent portion of the first SHA-256 block
+    // (W[0..2] + first 3 round ops). Valid for every nonce in this job.
+    nerd_sha256_bake(_midstate.digest, _tailBuf, _bake);
     strlcpy(_stats.jobId, _jobId, sizeof(_stats.jobId));
     _jobReady = true;
     if (_jobMutex) xSemaphoreGive(_jobMutex);
@@ -398,6 +401,7 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
     //    from _prepareJob can't tear our midstate/tail mid-copy.
     nerdSHA256_context midLocal;
     uint8_t  tailLocal[16];
+    uint32_t bakeLocal[15];
     uint32_t bitsLocal;
     bool     ready;
     if (_jobMutex) xSemaphoreTake(_jobMutex, portMAX_DELAY);
@@ -405,6 +409,7 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
     if (ready) {
         memcpy(&midLocal, &_midstate, sizeof(midLocal));
         memcpy(tailLocal, _tailBuf, sizeof(tailLocal));
+        memcpy(bakeLocal, _bake, sizeof(bakeLocal));
         bitsLocal = _cachedBits;
     }
     if (_jobMutex) xSemaphoreGive(_jobMutex);
@@ -423,7 +428,7 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
         tailLocal[14] = (uint8_t)((nonce >> 16) & 0xFF);
         tailLocal[15] = (uint8_t)((nonce >> 24) & 0xFF);
 
-        bool maybe = nerd_sha256d(&midLocal, tailLocal, hash);
+        bool maybe = nerd_sha256d_baked(midLocal.digest, tailLocal, bakeLocal, hash);
 
         if (maybe) {
             // Track best diff seen (approx) — cheap, only on passes of the

@@ -52,6 +52,11 @@ private:
     uint8_t            _tailBuf[16]  = {};  // bytes 64..79 of header; nonce in [12..15]
     uint8_t            _merkleRoot[32] = {};
     uint32_t           _cachedBits     = 0;
+    // Pre-baked first 3 SHA-256 rounds over the tail's nonce-independent
+    // bytes (W[0..2] = ntime + nbits + 0). Recomputed once per job in
+    // _prepareJob() and consumed by nerd_sha256d_baked() in _hashBatch() —
+    // skipping 3 round fn calls + 2 message-schedule ops per nonce.
+    uint32_t           _bake[15]       = {};
     volatile bool      _jobReady       = false;
 
     // Mutexes — created lazily in connect().  _jobMutex guards updates to the
