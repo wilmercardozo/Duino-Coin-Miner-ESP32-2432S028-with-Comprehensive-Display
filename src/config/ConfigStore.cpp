@@ -18,11 +18,9 @@ bool ConfigStore::load(Config& out) {
     if (!f) return false;
 
     JsonDocument doc;
-    if (deserializeJson(doc, f) != DeserializationError::Ok) {
-        f.close();
-        return false;
-    }
+    DeserializationError err = deserializeJson(doc, f);
     f.close();
+    if (err != DeserializationError::Ok) return false;
 
     strlcpy(out.wifi_ssid,    doc["wifi_ssid"]    | "", sizeof(out.wifi_ssid));
     strlcpy(out.wifi_pass,    doc["wifi_pass"]    | "", sizeof(out.wifi_pass));
@@ -33,7 +31,9 @@ bool ConfigStore::load(Config& out) {
     strlcpy(out.rig_name,     doc["rig_name"]     | "NerdDuino-1", sizeof(out.rig_name));
     out.pool_port       = doc["pool_port"]       | 21496;
     out.timezone_offset = doc["timezone_offset"] | -5;
-    out.algorithm = (doc["algorithm"] | 0) == 1 ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
+    uint8_t algo = doc["algorithm"] | 0;
+    out.algorithm = (algo == static_cast<uint8_t>(Algorithm::BITCOIN))
+                    ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
     out.valid = true;
     return true;
 }
@@ -53,7 +53,7 @@ bool ConfigStore::save(const Config& cfg) {
 
     File f = LittleFS.open(PATH, "w");
     if (!f) return false;
-    serializeJson(doc, f);
+    size_t written = serializeJson(doc, f);
     f.close();
-    return true;
+    return written > 0;
 }

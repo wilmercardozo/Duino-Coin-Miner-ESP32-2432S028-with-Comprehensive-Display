@@ -25,9 +25,12 @@ static bool parseConfigJson(const char* json, Config& out) {
     strlcpy(out.duco_key,    doc["duco_key"]    | "", sizeof(out.duco_key));
     strlcpy(out.btc_address, doc["btc_address"] | "", sizeof(out.btc_address));
     strlcpy(out.pool_url,    doc["pool_url"]    | "public-pool.io", sizeof(out.pool_url));
+    strlcpy(out.rig_name, doc["rig_name"] | "NerdDuino-1", sizeof(out.rig_name));
     out.pool_port       = doc["pool_port"]       | 21496;
     out.timezone_offset = doc["timezone_offset"] | -5;
-    out.algorithm = (doc["algorithm"] | 0) == 1 ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
+    uint8_t algo = doc["algorithm"] | 0;
+    out.algorithm = (algo == static_cast<uint8_t>(Algorithm::BITCOIN))
+                    ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
     out.valid = true;
     return true;
 }
@@ -41,6 +44,7 @@ void test_parse_duco_config() {
     TEST_ASSERT_EQUAL(Algorithm::DUINOCOIN, cfg.algorithm);
     TEST_ASSERT_EQUAL(21496, cfg.pool_port);
     TEST_ASSERT_EQUAL(-5, cfg.timezone_offset);
+    TEST_ASSERT_EQUAL_STRING("NerdDuino-1", cfg.rig_name);
     TEST_ASSERT_TRUE(cfg.valid);
 }
 
