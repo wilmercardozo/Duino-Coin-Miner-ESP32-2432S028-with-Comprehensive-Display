@@ -10,7 +10,7 @@
 
 // ---------------------------------------------------------------------------
 // DSHA1 — optimised SHA-1 variant used by DUCO-S1
-// Ported verbatim from ChocDuino/DSHA1.h (MIT licence)
+// Based on ChocDuino/DSHA1.h (MIT licence); see warmup() for one deviation.
 // ---------------------------------------------------------------------------
 class DSHA1 {
 public:
@@ -62,6 +62,8 @@ public:
 
     DSHA1& warmup() {
         uint8_t w[20];
+        // Note: original ChocDuino uses length 20 here, which is a bug (string is 14 chars).
+        // Using correct length 14 to avoid reading beyond the string literal.
         write((const uint8_t*)"warmupwarmupwa", 14).finalize(w);
         return *this;
     }
@@ -200,7 +202,7 @@ private:
 
 // ---------------------------------------------------------------------------
 // Counter — decimal string counter for nonce iteration
-// Ported verbatim from ChocDuino/Counter.h (MIT licence)
+// Based on ChocDuino/Counter.h (MIT licence)
 // ---------------------------------------------------------------------------
 template <unsigned int MAX_DIGITS>
 class Counter {
@@ -300,7 +302,10 @@ void DuinoCoinMiner::mine() {
     if (_lastSubmitMs && (now - _lastSubmitMs) > 300000UL) {
         Serial.println("[DUCO] no submit in 5m, reconnecting");
         _client.stop();
-        _connectToNode();
+        if (!_connectToNode()) {
+            Serial.println("[duco] Reconnect after stale-submit failed");
+            return;
+        }
         return;
     }
 
@@ -313,7 +318,8 @@ void DuinoCoinMiner::mine() {
     prefix.write((const unsigned char*)_lastHash.c_str(), _lastHash.length());
     prefix.write((const unsigned char*)",", 1);
 
-    uint32_t startUs = micros();
+    uint32_t startUs = micros();   // captured once; never reset inside the loop
+    uint32_t yieldUs = startUs;    // separate tracker for watchdog yield cadence
     uint8_t  hashOut[20];
 
     Counter<10> counter;
@@ -332,9 +338,9 @@ void DuinoCoinMiner::mine() {
         }
 
         // Yield to RTOS every ~100ms to prevent watchdog trips
-        if ((micros() - startUs) > 100000UL) {
+        if ((micros() - yieldUs) > 100000UL) {
             delay(1);
-            startUs = micros();
+            yieldUs = micros();
             if (!_client.connected()) {
                 Serial.println("[DUCO] connection dropped during hash loop");
                 _client.stop();
@@ -572,13 +578,13 @@ bool DuinoCoinMiner::_submitShare(uint32_t nonce, uint32_t elapsedMs) {
 
     float hr = (_stats.hashrate > 0) ? (_stats.hashrate * 1000.0f) : 1.0f;
 
-    _client.printf("%lu,%.0f,%s %s,%s,DUCOID%s\n",
+    _client.printf("%lu,%.0f,%s %s,%s,%s\n",
                    (unsigned long)nonce,
                    hr,
                    MINER_BANNER,
                    MINER_VER,
                    _cfg.rig_name,
-                   _chipID.c_str());
+                   _cfg.duco_key);
 
     uint32_t pingStart = millis();
     if (!_waitForData(8000)) {
