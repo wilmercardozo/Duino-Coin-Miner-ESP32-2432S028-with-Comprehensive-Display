@@ -101,6 +101,12 @@ void setup()
         // Portal start placeholder
     }
 
+    if (WiFiMgr::isConnected()) {
+        configTime((long)gConfig.timezone_offset * 3600, 0,
+                   "pool.ntp.org", "time.nist.gov");
+        Serial.println("[ntp] Sync started");
+    }
+
     if (WiFiMgr::isConnected() && !WiFiMgr::needsPortal()) {
         startMining();
     }
