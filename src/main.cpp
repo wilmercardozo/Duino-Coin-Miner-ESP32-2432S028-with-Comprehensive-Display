@@ -108,6 +108,17 @@ static void taskBalance(void*)
     }
 }
 
+// NVS persistence task — writes accumulated counters (shares/bestDiff/
+// totalHashes/balance) every 60 s so a power cut doesn't zero out the
+// user's history.  Cheap: a few u32/u64 NVS puts, takes <5 ms.
+static void taskStatsPersist(void*)
+{
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(60000));
+        if (gMiner) gMiner->persistStats();
+    }
+}
+
 void startMining()
 {
     if (gConfig.algorithm == Algorithm::DUINOCOIN) {
@@ -132,6 +143,7 @@ void startMining()
         // uses its own heap; the task mostly waits).  Low priority (1) and
         // pinned to core 0 to avoid stealing cycles from mining on core 1.
         xTaskCreatePinnedToCore(taskBalance, "balance", 6144, nullptr, 1, nullptr, 0);
+        xTaskCreatePinnedToCore(taskStatsPersist, "persist", 3072, nullptr, 1, nullptr, 0);
 
         // Dual-core hashing for BTC only.  Secondary runs on core 0 at
         // priority 1 (below UI at 2) so the UI remains responsive.

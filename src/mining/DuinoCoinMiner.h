@@ -13,6 +13,7 @@ public:
     MiningStats getStats()  override;
     void disconnect()       override;
     void fetchBalance()     override;   // hits /users/<user> on the DUCO REST API
+    void persistStats()     override;   // writes counters to NVS (see StatsStore)
 
 private:
     const Config& _cfg;

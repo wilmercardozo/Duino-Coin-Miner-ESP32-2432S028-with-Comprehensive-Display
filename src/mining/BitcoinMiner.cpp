@@ -3,6 +3,7 @@
 // Hash core: nerdSHA256plus (Apache-2.0, NerdMiner_v2 / Blockstream Jade lineage)
 #pragma GCC optimize("-O2")
 #include "BitcoinMiner.h"
+#include "config/StatsStore.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "mbedtls/sha256.h"
@@ -29,6 +30,13 @@ BitcoinMiner::BitcoinMiner(const Config& cfg) : _cfg(cfg) {
 
     _jobMutex    = xSemaphoreCreateMutex();
     _clientMutex = xSemaphoreCreateMutex();
+
+    // Restore persisted counters so bestDiff / totalHashes / shares survive
+    // a reboot.  _startMs stays 0 here; connect() sets it so sessionMs-based
+    // hashrate computes from this run, not since-first-boot.
+    StatsStore::load(_stats.algorithm, _stats);
+    _totalHashes = _stats.totalHashes;
+    _bestDiff    = _stats.bestDifficulty;
 }
 
 BitcoinMiner::~BitcoinMiner() {
@@ -37,11 +45,21 @@ BitcoinMiner::~BitcoinMiner() {
     if (_clientMutex) vSemaphoreDelete(_clientMutex);
 }
 
+void BitcoinMiner::persistStats() {
+    // Snapshot to _stats first so getStats()-computed fields are current.
+    _stats.totalHashes    = __atomic_load_n(&_totalHashes, __ATOMIC_RELAXED);
+    _stats.bestDifficulty = _bestDiff;
+    StatsStore::save(_stats.algorithm, _stats);
+}
+
 // ---------------------------------------------------------------------------
 // connect() — TCP connect, subscribe, authorize
 // ---------------------------------------------------------------------------
 bool BitcoinMiner::connect() {
     _startMs = millis();
+    // Anchor the hashrate denominator so restored _totalHashes doesn't
+    // make the first batch look absurdly fast.
+    _sessionHashBase = __atomic_load_n(&_totalHashes, __ATOMIC_RELAXED);
     Serial.printf("[btc] Connecting to %s:%d\n", _cfg.pool_url, _cfg.pool_port);
     if (!_client.connect(_cfg.pool_url, _cfg.pool_port)) {
         Serial.println("[btc] TCP connect failed");
@@ -462,7 +480,9 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
     uint32_t sessionMs = millis() - _startMs;
     if (sessionMs > 0) {
         uint64_t total = __atomic_load_n(&_totalHashes, __ATOMIC_RELAXED);
-        _stats.hashrate = (float)total / (float)sessionMs;   // H/ms == kH/s
+        uint64_t sessionHashes = (total >= _sessionHashBase)
+                                  ? (total - _sessionHashBase) : total;
+        _stats.hashrate = (float)sessionHashes / (float)sessionMs;   // H/ms == kH/s
     }
 
     uint32_t now = millis();

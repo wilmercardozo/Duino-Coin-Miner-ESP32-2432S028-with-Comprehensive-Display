@@ -1,6 +1,7 @@
 #pragma GCC optimize("-Ofast")
 
 #include "DuinoCoinMiner.h"
+#include "config/StatsStore.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -264,6 +265,13 @@ DuinoCoinMiner::DuinoCoinMiner(const Config& cfg)
     memset(_expectedHash, 0, sizeof(_expectedHash));
     strncpy(_stats.algorithm, "DUCO", sizeof(_stats.algorithm) - 1);
     _buildChipID();
+    // Pull previously-persisted counters (shares/balance/etc.) so the
+    // Dashboard shows cumulative history instead of resetting on reboot.
+    StatsStore::load(_stats.algorithm, _stats);
+}
+
+void DuinoCoinMiner::persistStats() {
+    StatsStore::save(_stats.algorithm, _stats);
 }
 
 DuinoCoinMiner::~DuinoCoinMiner() {

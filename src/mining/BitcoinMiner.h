@@ -18,6 +18,7 @@ public:
     void mine()            override;   // primary: pool pump + hash
     MiningStats getStats() override;
     void disconnect()      override;
+    void persistStats()    override;   // writes counters to NVS (see StatsStore)
 
     // Secondary task entry point (dual-core BTC hashing).  No network I/O;
     // just hashes against the current job using an atomic nonce dispenser.
@@ -29,6 +30,10 @@ private:
     MiningStats   _stats;
     uint32_t      _startMs        = 0;
     volatile uint32_t _nonceHead  = 0;  // atomic nonce dispenser (both tasks)
+    // Snapshot of _totalHashes at connect() — hashrate is computed from
+    // (totalNow - sessionHashBase)/sessionMs so that a pre-populated counter
+    // restored from NVS doesn't inflate the displayed rate.
+    uint64_t      _sessionHashBase = 0;
 
     // Stratum job state
     char _jobId[64]         = "";

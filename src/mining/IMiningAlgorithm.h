@@ -29,4 +29,8 @@ public:
     // Optional: fetch current wallet balance from the coin's public API.
     // Default no-op (e.g. Stratum BTC pools don't expose a balance concept).
     virtual void fetchBalance() {}
+
+    // Optional: persist share/hash counters to NVS so they survive reboots.
+    // Called from a low-priority periodic task; default no-op.
+    virtual void persistStats() {}
 };
