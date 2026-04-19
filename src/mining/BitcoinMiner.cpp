@@ -60,11 +60,13 @@ bool BitcoinMiner::_readLine(String& out, uint32_t timeoutMs) {
 // ---------------------------------------------------------------------------
 bool BitcoinMiner::_sendSubscribe() {
     String req = "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"" MINER_VERSION "\"]}\n";
+    uint32_t t0 = millis();
     _client.print(req);
     String resp;
     if (!_readLine(resp, 10000)) { Serial.println("[btc] Subscribe timeout"); return false; }
+    _stats.pingMs = millis() - t0;
     if (!_parseSubscribeResponse(resp)) { Serial.println("[btc] Subscribe parse failed"); return false; }
-    Serial.printf("[btc] Subscribe OK — extranonce1=%s size=%d\n", _extranonce1, _extranonce2Size);
+    Serial.printf("[btc] Subscribe OK — extranonce1=%s size=%d ping=%dms\n", _extranonce1, _extranonce2Size, _stats.pingMs);
     return true;
 }
 
@@ -247,12 +249,14 @@ bool BitcoinMiner::_meetsTarget(const uint8_t* hash32) {
     uint32_t mantissa = bits & 0x00FFFFFFu;
 
     // Build 32-byte target (big-endian)
+    // Compact format: the mantissa MSB sits at byte index (32 - exp) in the
+    // big-endian 256-bit target, followed by the middle and LSB bytes.
     uint8_t target[32] = {};
     if (exp >= 1 && exp <= 32) {
-        int bytePos = (int)exp - 1;  // most-significant byte position of mantissa
-        if (bytePos - 0 >= 0 && bytePos - 0 < 32) target[bytePos - 0] = (uint8_t)((mantissa >> 16) & 0xFF);
-        if (bytePos - 1 >= 0 && bytePos - 1 < 32) target[bytePos - 1] = (uint8_t)((mantissa >> 8)  & 0xFF);
-        if (bytePos - 2 >= 0 && bytePos - 2 < 32) target[bytePos - 2] = (uint8_t)( mantissa        & 0xFF);
+        int bytePos = 32 - (int)exp;  // most-significant byte position of mantissa
+        if (bytePos + 0 >= 0 && bytePos + 0 < 32) target[bytePos + 0] = (uint8_t)((mantissa >> 16) & 0xFF);
+        if (bytePos + 1 >= 0 && bytePos + 1 < 32) target[bytePos + 1] = (uint8_t)((mantissa >> 8)  & 0xFF);
+        if (bytePos + 2 >= 0 && bytePos + 2 < 32) target[bytePos + 2] = (uint8_t)( mantissa        & 0xFF);
     }
 
     // SHA256d output is little-endian; reverse to compare as big-endian
@@ -287,8 +291,26 @@ bool BitcoinMiner::_submitShare(uint32_t nonce) {
     req += "\",\""; req += nonceBuf;
     req += "\"]}\n";
     _client.print(req);
-    _stats.sharesAccepted++;
     Serial.printf("[btc] Share submitted — nonce=%s\n", nonceBuf);
+
+    // Read pool response to determine accept/reject
+    String resp;
+    if (_readLine(resp, 5000)) {
+        // Accepted: {"id":4,"result":true,"error":null}
+        // Rejected: {"id":4,"result":null,"error":[21,...]}  or result:false
+        bool accepted = (resp.indexOf("\"result\":true") >= 0);
+        if (accepted) {
+            _stats.sharesAccepted++;
+            Serial.println("[btc] Share accepted");
+        } else {
+            _stats.sharesRejected++;
+            Serial.printf("[btc] Share rejected: %s\n", resp.c_str());
+        }
+    } else {
+        // Timeout reading response — count as rejected to avoid silent loss
+        _stats.sharesRejected++;
+        Serial.println("[btc] Share response timeout — counted as rejected");
+    }
     return true;
 }
 
