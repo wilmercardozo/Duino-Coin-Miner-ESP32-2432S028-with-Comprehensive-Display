@@ -83,30 +83,36 @@ void SystemScreen::create()
     s_topBar.create(s_scr, "Sistema");
 
     // ── Card 1: RED + POOL (two columns) ────────────────────────────────────
-    lv_obj_t* c1 = makeCard(s_scr, 8, 24, 304, 90);
+    // Pitch 18 px matches Montserrat 14's real line height (16 px was too
+    // tight — descenders bled into the next row). Card taller by 10 px to
+    // accommodate; cards 2 and 3 shifted down to match.
+    lv_obj_t* c1 = makeCard(s_scr, 8, 24, 304, 100);
 
     makeLabel(c1, 0,   0, COL_ORANGE, "RED");
     makeLabel(c1, 148, 0, COL_ORANGE, "POOL");
 
     // Left column
-    s_lblSsid = makeLabel(c1, 0, 18, COL_LIGHT, "SSID: --");
-    s_lblRssi = makeLabel(c1, 0, 34, COL_GREY,  "RSSI: --");
-    s_lblIp   = makeLabel(c1, 0, 50, COL_GREY,  "IP:   --");
-    s_lblGw   = makeLabel(c1, 0, 66, COL_GREY,  "GW:   --");
+    s_lblSsid = makeLabel(c1, 0, 20, COL_LIGHT, "SSID: --");
+    s_lblRssi = makeLabel(c1, 0, 38, COL_GREY,  "RSSI: --");
+    s_lblIp   = makeLabel(c1, 0, 56, COL_GREY,  "IP:   --");
+    s_lblGw   = makeLabel(c1, 0, 74, COL_GREY,  "GW:   --");
 
     // Right column
-    s_lblPool = makeLabel(c1, 148, 18, COL_LIGHT, "--");
-    s_lblJob  = makeLabel(c1, 148, 34, COL_GREY,  "job:  --");
-    s_lblDiff = makeLabel(c1, 148, 50, COL_GREY,  "diff: --");
-    s_lblPing = makeLabel(c1, 148, 66, COL_GREEN, "ping: --");
+    s_lblPool = makeLabel(c1, 148, 20, COL_LIGHT, "--");
+    s_lblJob  = makeLabel(c1, 148, 38, COL_GREY,  "job:  --");
+    s_lblDiff = makeLabel(c1, 148, 56, COL_GREY,  "diff: --");
+    s_lblPing = makeLabel(c1, 148, 74, COL_GREEN, "ping: --");
 
-    lv_obj_set_width(s_lblSsid, 140);
-    lv_label_set_long_mode(s_lblSsid, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_lblPool, 140);
-    lv_label_set_long_mode(s_lblPool, LV_LABEL_LONG_DOT);
+    // Every right-column label that can receive variable-length data needs
+    // a bounded width + LONG_DOT so Stratum job IDs / long diffs don't run
+    // past the card edge and visually collide with adjacent labels.
+    for (lv_obj_t* l : {s_lblSsid, s_lblPool, s_lblJob, s_lblDiff}) {
+        lv_obj_set_width(l, 140);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    }
 
     // ── Card 2: MINADO ──────────────────────────────────────────────────────
-    lv_obj_t* c2 = makeCard(s_scr, 8, 118, 304, 44);
+    lv_obj_t* c2 = makeCard(s_scr, 8, 130, 304, 44);
     makeLabel(c2, 0, 0, COL_ORANGE, "MINADO");
     s_lblShares = makeLabel(c2, 90,  0, COL_GREEN, "OK 0 / BAD 0");
     s_lblBest   = makeLabel(c2, 0,  22, COL_LIGHT, "best: --");
@@ -114,7 +120,7 @@ void SystemScreen::create()
     s_lblHashes = makeLabel(c2, 195, 22, COL_GREY,  "h: --");
 
     // ── Card 3: SISTEMA ─────────────────────────────────────────────────────
-    lv_obj_t* c3 = makeCard(s_scr, 8, 166, 304, 44);
+    lv_obj_t* c3 = makeCard(s_scr, 8, 178, 304, 44);
     makeLabel(c3, 0, 0, COL_ORANGE, "SISTEMA");
     s_lblHeap = makeLabel(c3, 90,  0, COL_LIGHT, "heap: --");
     s_lblUp   = makeLabel(c3, 0,  22, COL_GREY,  "up: --");
