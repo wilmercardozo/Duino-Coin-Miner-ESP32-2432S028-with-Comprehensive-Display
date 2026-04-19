@@ -18,7 +18,7 @@ void setup() {
 
     if (!hasConfig) {
         Serial.println("[boot] No config — entering portal");
-        // Portal will be started in Task 10; placeholder for now
+        WiFiMgr::clearPortalFlag();
         return;
     }
 

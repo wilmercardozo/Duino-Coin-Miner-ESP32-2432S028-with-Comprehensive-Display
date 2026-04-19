@@ -1,4 +1,5 @@
 #include "WiFiManager.h"
+#include <Arduino.h>
 #include <WiFi.h>
 
 static bool s_needsPortal = false;
