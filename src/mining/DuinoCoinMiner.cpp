@@ -392,52 +392,69 @@ void DuinoCoinMiner::_buildChipID() {
 }
 
 bool DuinoCoinMiner::_resolvePool() {
-    Serial.println("[DUCO] fetching pool from server.duinocoin.com/getPool");
+    // 3 attempts with 2/4/6 s backoff — useful right after boot when the
+    // router's DNS is still waking up (MAKKI routers exhibited this).
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        Serial.printf("[DUCO] fetching pool (attempt %d/3)\n", attempt);
 
-    WiFiClientSecure sc;
-    sc.setInsecure();
-    sc.setTimeout(3000);
+        WiFiClientSecure sc;
+        sc.setInsecure();
+        sc.setTimeout(5000);
 
-    HTTPClient https;
-    https.setTimeout(3000);
-    https.setReuse(false);
+        HTTPClient https;
+        https.setTimeout(5000);
+        https.setReuse(false);
 
-    if (!https.begin(sc, "https://server.duinocoin.com/getPool")) {
-        Serial.println("[DUCO] https.begin failed");
-        return false;
-    }
+        if (!https.begin(sc, "https://server.duinocoin.com/getPool")) {
+            Serial.println("[DUCO] https.begin failed");
+            delay(2000 * attempt);
+            continue;
+        }
 
-    https.addHeader("Accept", "*/*");
-    int code = https.GET();
+        https.addHeader("Accept", "*/*");
+        int code = https.GET();
 
-    if (code != HTTP_CODE_OK) {
-        Serial.printf("[DUCO] getPool HTTP %d\n", code);
+        if (code != HTTP_CODE_OK) {
+            Serial.printf("[DUCO] getPool HTTP %d\n", code);
+            https.end();
+            delay(2000 * attempt);
+            continue;
+        }
+
+        String payload = https.getString();
         https.end();
-        return false;
+
+        JsonDocument doc;
+        if (deserializeJson(doc, payload)) {
+            Serial.println("[DUCO] getPool JSON parse error");
+            delay(2000 * attempt);
+            continue;
+        }
+
+        _host = doc["ip"].as<String>();
+        _port = doc["port"].as<int>();
+
+        if (_host.length() == 0 || _port == 0) {
+            Serial.println("[DUCO] getPool: missing ip/port");
+            delay(2000 * attempt);
+            continue;
+        }
+
+        const char* name = doc["name"] | "?";
+        snprintf(_stats.poolUrl, sizeof(_stats.poolUrl), "%s:%d (%s)",
+                 _host.c_str(), _port, name);
+
+        Serial.printf("[DUCO] pool: %s\n", _stats.poolUrl);
+        return true;
     }
 
-    String payload = https.getString();
-    https.end();
-
-    JsonDocument doc;
-    if (deserializeJson(doc, payload)) {
-        Serial.println("[DUCO] getPool JSON parse error");
-        return false;
-    }
-
-    _host = doc["ip"].as<String>();
-    _port = doc["port"].as<int>();
-
-    if (_host.length() == 0 || _port == 0) {
-        Serial.println("[DUCO] getPool: missing ip/port");
-        return false;
-    }
-
-    const char* name = doc["name"] | "?";
-    snprintf(_stats.poolUrl, sizeof(_stats.poolUrl), "%s:%d (%s)",
-             _host.c_str(), _port, name);
-
-    Serial.printf("[DUCO] pool: %s\n", _stats.poolUrl);
+    // All attempts exhausted — fall back to the well-known public node so
+    // the rig still mines even if getPool is unreachable.
+    _host = "server.duinocoin.com";
+    _port = 2812;
+    snprintf(_stats.poolUrl, sizeof(_stats.poolUrl), "%s:%d (fallback)",
+             _host.c_str(), _port);
+    Serial.printf("[DUCO] using fallback pool: %s\n", _stats.poolUrl);
     return true;
 }
 

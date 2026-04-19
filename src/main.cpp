@@ -62,10 +62,12 @@ static IMiningAlgorithm* gMiner = nullptr;
 static void taskMining(void* param)
 {
     IMiningAlgorithm* miner = (IMiningAlgorithm*)param;
-    if (!miner->connect()) {
-        Serial.println("[mining] connect() failed");
-        vTaskDelete(nullptr);
-        return;
+    // Retry connect() forever instead of dying on first failure — routers
+    // with flaky DNS, pools briefly down, or a late-booting captive all
+    // used to brick the rig until restart.
+    while (!miner->connect()) {
+        Serial.println("[mining] connect() failed — retry in 10 s");
+        vTaskDelay(pdMS_TO_TICKS(10000));
     }
     for (;;) {
         miner->mine();

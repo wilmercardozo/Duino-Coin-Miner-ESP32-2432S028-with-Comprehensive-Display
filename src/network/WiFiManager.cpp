@@ -26,6 +26,19 @@ bool WiFiMgr::connect(const Config& cfg) {
 
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("[wifi] Connected — IP %s\n", WiFi.localIP().toString().c_str());
+
+        // Some routers hand out their own IP as DNS but then don't actually
+        // resolve anything (observed with a MAKKI router — getPool died with
+        // hostByName DNS Failed).  Override with public DNS while keeping the
+        // DHCP-assigned IP/gateway/subnet so we don't break the local link.
+        IPAddress ip   = WiFi.localIP();
+        IPAddress gw   = WiFi.gatewayIP();
+        IPAddress mask = WiFi.subnetMask();
+        IPAddress dns1(1, 1, 1, 1);
+        IPAddress dns2(8, 8, 8, 8);
+        WiFi.config(ip, gw, mask, dns1, dns2);
+        Serial.printf("[wifi] DNS set to %s / %s\n",
+                      dns1.toString().c_str(), dns2.toString().c_str());
         return true;
     }
 
