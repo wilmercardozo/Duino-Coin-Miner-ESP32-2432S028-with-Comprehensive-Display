@@ -452,7 +452,7 @@ double BitcoinMiner::_shareDifficulty(const uint8_t* hash32) {
 // Returns the number of hashes actually performed (may be 0 if the job
 // changed mid-batch).
 // ---------------------------------------------------------------------------
-uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
+uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize, uint64_t& coreCounter) {
     // 1. Snapshot the shared job state under the mutex so concurrent updates
     //    from _prepareJob can't tear our midstate/tail mid-copy.
     nerdSHA256_context midLocal;
@@ -506,6 +506,11 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
 
     // 3. Contribute to cumulative totals and recompute hashrate.
     __atomic_fetch_add(&_totalHashes, (uint64_t)batchSize, __ATOMIC_RELAXED);
+    // Per-core counter — only the owning task writes this field; atomic
+    // store is cheap and prevents the 30 s log from reading a torn u64.
+    __atomic_store_n(&coreCounter,
+                     __atomic_load_n(&coreCounter, __ATOMIC_RELAXED) + batchSize,
+                     __ATOMIC_RELAXED);
 
     // Combined hashrate = totalHashes / sessionMs.  The previous per-batch
     // EMA (`hashrate = 0.5*hashrate + 0.5*batch/elapsed`) gave each core's
@@ -525,12 +530,20 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
 
     uint32_t now = millis();
     if (now - _lastReportMs > 30000UL) {
-        Serial.printf("[btc] hr=%.1f kH/s total=%llu bestDiff=%.2f accepted=%lu rejected=%lu\n",
+        uint64_t pNow = __atomic_load_n(&_primaryHashes,   __ATOMIC_RELAXED);
+        uint64_t sNow = __atomic_load_n(&_secondaryHashes, __ATOMIC_RELAXED);
+        uint32_t wMs  = (_lastReportMs == 0) ? 30000 : (now - _lastReportMs);
+        float    pKHs = (float)(pNow - _primaryHashesLast)   / (float)wMs;
+        float    sKHs = (float)(sNow - _secondaryHashesLast) / (float)wMs;
+        Serial.printf("[btc] hr=%.1f kH/s split=P:%.1f+S:%.1f total=%llu bestDiff=%.2f ok=%lu rej=%lu\n",
                       (double)_stats.hashrate,
+                      (double)pKHs, (double)sKHs,
                       (unsigned long long)_totalHashes,
                       (double)_bestDiff,
                       (unsigned long)_stats.sharesAccepted,
                       (unsigned long)_stats.sharesRejected);
+        _primaryHashesLast   = pNow;
+        _secondaryHashesLast = sNow;
         _lastReportMs = now;
     }
 
@@ -574,18 +587,21 @@ void BitcoinMiner::mine() {
         return;
     }
 
-    _hashBatch(10000);
+    _hashBatch(10000, _primaryHashes);
 }
 
 // ---------------------------------------------------------------------------
 // secondaryMine() — core-0 task: hash only, no network I/O.
+// Intentionally does NOT touch _client: WiFiClient is not thread-safe, and
+// the primary already tears down _jobReady in disconnect() when the socket
+// drops, so checking _jobReady alone is both safer and correct.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::secondaryMine() {
-    if (!_jobReady || !_client.connected()) {
+    if (!_jobReady) {
         vTaskDelay(pdMS_TO_TICKS(100));
         return;
     }
-    _hashBatch(10000);
+    _hashBatch(10000, _secondaryHashes);
 }
 
 MiningStats BitcoinMiner::getStats() {

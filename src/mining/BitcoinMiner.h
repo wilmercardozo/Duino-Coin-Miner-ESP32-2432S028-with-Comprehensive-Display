@@ -75,6 +75,15 @@ private:
     uint64_t _totalHashes   = 0;     // sum across both cores
     float    _bestDiff      = 0.0f;  // highest share difficulty seen
 
+    // Per-core counters so the 30 s log can prove both cores are hashing
+    // (when one goes silent the combined rate halves without warning).
+    // Each counter is written only by its own task, read by primary for
+    // logging — use __atomic_load_n to avoid 64-bit tearing on read.
+    uint64_t _primaryHashes   = 0;
+    uint64_t _secondaryHashes = 0;
+    uint64_t _primaryHashesLast   = 0;
+    uint64_t _secondaryHashesLast = 0;
+
     // Stratum watchdog — pools occasionally go silent without closing the
     // TCP socket. If no mining.notify arrives for kStaleNotifyMs, reconnect.
     uint32_t _lastNotifyMs = 0;
@@ -109,7 +118,9 @@ private:
 
     // Hash a fixed batch using a local copy of the job state.  Returns the
     // number of hashes performed.  Both mine() and secondaryMine() use this.
-    uint32_t _hashBatch(uint32_t batchSize);
+    // coreCounter is incremented by batchSize — each task passes its own
+    // counter so we can tell per-core contribution apart.
+    uint32_t _hashBatch(uint32_t batchSize, uint64_t& coreCounter);
 
     // Compute the approximate share difficulty of a 32-byte hash (LE, byte 31=MSB).
     // Used to track the best share seen.  Cheap: only looks at the top 64 bits.
