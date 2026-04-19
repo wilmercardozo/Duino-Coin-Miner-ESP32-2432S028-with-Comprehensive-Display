@@ -60,6 +60,9 @@ bool BitcoinMiner::connect() {
     // Anchor the hashrate denominator so restored _totalHashes doesn't
     // make the first batch look absurdly fast.
     _sessionHashBase = __atomic_load_n(&_totalHashes, __ATOMIC_RELAXED);
+    // Seed the notify watchdog now — otherwise it would fire ~10 min after
+    // boot even on a healthy pool, before the first notify ever arrived.
+    _lastNotifyMs = millis();
     Serial.printf("[btc] Connecting to %s:%d\n", _cfg.pool_url, _cfg.pool_port);
     if (!_client.connect(_cfg.pool_url, _cfg.pool_port)) {
         Serial.println("[btc] TCP connect failed");
@@ -158,6 +161,7 @@ bool BitcoinMiner::_parseNotify(const String& line) {
     bool cleanJobs = p[8] | false;
     if (cleanJobs) __atomic_store_n(&_nonceHead, 0u, __ATOMIC_RELAXED);
     _hasJob = true;
+    _lastNotifyMs = millis();   // feed the stratum watchdog
 
     _prepareJob();
     return true;
@@ -521,6 +525,16 @@ void BitcoinMiner::mine() {
 
     if (!_client.connected()) {
         Serial.println("[btc] Disconnected — reconnecting");
+        disconnect();
+        if (!connect()) vTaskDelay(pdMS_TO_TICKS(5000));
+        return;
+    }
+
+    // Stratum watchdog: if the pool hasn't sent a mining.notify in 10 min
+    // it's either hung or silently dropped us — force a reconnect.
+    if (_lastNotifyMs && (millis() - _lastNotifyMs) > kStaleNotifyMs) {
+        Serial.printf("[btc] watchdog: %lu ms since last notify — reconnecting\n",
+                      (unsigned long)(millis() - _lastNotifyMs));
         disconnect();
         if (!connect()) vTaskDelay(pdMS_TO_TICKS(5000));
         return;

@@ -75,6 +75,11 @@ private:
     uint64_t _totalHashes   = 0;     // sum across both cores
     float    _bestDiff      = 0.0f;  // highest share difficulty seen
 
+    // Stratum watchdog — pools occasionally go silent without closing the
+    // TCP socket. If no mining.notify arrives for kStaleNotifyMs, reconnect.
+    uint32_t _lastNotifyMs = 0;
+    static constexpr uint32_t kStaleNotifyMs = 600000UL;   // 10 min
+
     // Pending share submissions (non-blocking): we fire-and-forget the submit
     // line, then read the response on a later mine() iteration. A small FIFO
     // avoids losing accept/reject counts when several shares land close together.
