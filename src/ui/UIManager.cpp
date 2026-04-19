@@ -65,6 +65,7 @@ void init()
 
     // 2. LVGL init
     lv_init();
+    lv_tick_set_cb([]() -> uint32_t { return (uint32_t)millis(); });
 
     // 3. Create display driver
     s_disp = lv_display_create(320, 240);

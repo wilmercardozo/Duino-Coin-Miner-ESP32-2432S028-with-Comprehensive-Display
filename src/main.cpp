@@ -10,17 +10,22 @@
 #include "portal/ConfigPortal.h"
 #include "portal/OTAHandler.h"
 #include <XPT2046_Touchscreen.h>
+#include <SPI.h>
 
-// ── CYD touch pins ────────────────────────────────────────────────────────────
-#define TOUCH_CS  33
-#define TOUCH_IRQ 36
+// ── CYD touch pins (VSPI bus — separate from TFT HSPI) ───────────────────────
+#define TOUCH_CS   33
+#define TOUCH_IRQ  36
+#define TOUCH_SCK  25
+#define TOUCH_MISO 39
+#define TOUCH_MOSI 32
 
 // ── shared state ──────────────────────────────────────────────────────────────
 Config gConfig;
 volatile bool gPortalRequested = false;   // set by UIManager on long-press
 volatile bool gInPortalMode = false;
 
-// ── touch + UI task ───────────────────────────────────────────────────────────
+// ── touch SPI (VSPI) + touchscreen ───────────────────────────────────────────
+static SPIClass          s_touchSPI(VSPI);
 static XPT2046_Touchscreen s_touch(TOUCH_CS, TOUCH_IRQ);
 
 static void taskUI(void*)
@@ -44,7 +49,8 @@ static void taskUI(void*)
 void startUI()
 {
     UIManager::init();
-    s_touch.begin();
+    s_touchSPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, -1);
+    s_touch.begin(s_touchSPI);
     s_touch.setRotation(1);
     xTaskCreatePinnedToCore(taskUI, "ui", 8192, nullptr, 2, nullptr, 0);
 }
@@ -125,9 +131,9 @@ void loop()
 
     if (gPortalRequested) {
         gPortalRequested = false;
-        gInPortalMode = true;
-        ConfigPortal::start();
-        return;
+        ConfigStore::erase();  // erase config so next boot enters portal cleanly
+        delay(100);
+        ESP.restart();         // clean reboot — avoids WiFi mode conflict mid-mining
     }
 
     static unsigned long s_lastUpdate = 0;
