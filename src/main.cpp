@@ -87,6 +87,8 @@ void setup()
         Serial.println("[boot] LittleFS mount failed");
     }
 
+    startUI();  // always init display before any branching
+
     bool hasConfig = ConfigStore::load(gConfig);
 
     if (!hasConfig) {
@@ -110,7 +112,6 @@ void setup()
                    "pool.ntp.org", "time.nist.gov");
         Serial.println("[ntp] Sync started");
         OTAHandler::init(gConfig.rig_name);
-        startUI();
         startMining();
     }
 }
