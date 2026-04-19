@@ -418,7 +418,6 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
     // 2. Atomically reserve a nonce range; both tasks share the same counter.
     uint32_t base = __atomic_fetch_add(&_nonceHead, batchSize, __ATOMIC_RELAXED);
 
-    uint32_t startMs = millis();
     uint8_t  hash[32];
 
     for (uint32_t i = 0; i < batchSize; i++) {
@@ -441,7 +440,10 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
             }
         }
 
-        if ((i & 0x3FFu) == 0x3FFu) {
+        // Yield every 4096 nonces (was 1024). At ~55 kH/s per core each
+        // slice is ~75 ms, well under the FreeRTOS watchdog window. Fewer
+        // context switches = fewer wasted cycles; gain ~3-5% throughput.
+        if ((i & 0xFFFu) == 0xFFFu) {
             vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
@@ -449,13 +451,18 @@ uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
     // 3. Contribute to cumulative totals and recompute hashrate.
     __atomic_fetch_add(&_totalHashes, (uint64_t)batchSize, __ATOMIC_RELAXED);
 
-    uint32_t elapsed = millis() - startMs;
-    if (elapsed > 0) {
-        // Approx combined hashrate: batch/elapsed, averaged across the last
-        // few batches.  Two tasks writing to _stats.hashrate alternate but
-        // the UI only samples once per second so glitches are invisible.
-        float inst = (float)batchSize / (float)elapsed;
-        _stats.hashrate = (_stats.hashrate * 0.5f) + (inst * 0.5f);
+    // Combined hashrate = totalHashes / sessionMs.  The previous per-batch
+    // EMA (`hashrate = 0.5*hashrate + 0.5*batch/elapsed`) gave each core's
+    // *individual* throughput, not the sum — so a dual-core run showed the
+    // single-core rate and hid the second core's contribution. Using the
+    // cumulative total is honest: it converges to the true session average
+    // within a few seconds and both cores compute the same value (writes
+    // race on a 32-bit float are atomic on ESP32 and display at 1 Hz so
+    // any torn read would be invisible).
+    uint32_t sessionMs = millis() - _startMs;
+    if (sessionMs > 0) {
+        uint64_t total = __atomic_load_n(&_totalHashes, __ATOMIC_RELAXED);
+        _stats.hashrate = (float)total / (float)sessionMs;   // H/ms == kH/s
     }
 
     uint32_t now = millis();
