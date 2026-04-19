@@ -229,52 +229,48 @@ void BitcoinMiner::_prepareJob() {
     }
 
     memcpy(_merkleRoot, cbHash, 32);
+
+    // Pre-build bytes 0..75 of the block header; only nonce (76..79) varies.
+    // 1. Version — little-endian 32-bit
+    uint32_t version = strtoul(_version, nullptr, 16);
+    _headerTemplate[0] = (uint8_t)(version & 0xFF);
+    _headerTemplate[1] = (uint8_t)((version >> 8)  & 0xFF);
+    _headerTemplate[2] = (uint8_t)((version >> 16) & 0xFF);
+    _headerTemplate[3] = (uint8_t)((version >> 24) & 0xFF);
+    // 2. Previous block hash — word-reversed to network order
+    uint8_t prevHashBytes[32] = {};
+    _hexToBytes(_prevHash, prevHashBytes, 32);
+    for (int i = 0; i < 8; i++) {
+        _headerTemplate[4 + i*4 + 0] = prevHashBytes[i*4 + 3];
+        _headerTemplate[4 + i*4 + 1] = prevHashBytes[i*4 + 2];
+        _headerTemplate[4 + i*4 + 2] = prevHashBytes[i*4 + 1];
+        _headerTemplate[4 + i*4 + 3] = prevHashBytes[i*4 + 0];
+    }
+    // 3. Merkle root
+    memcpy(_headerTemplate + 36, _merkleRoot, 32);
+    // 4. Timestamp — little-endian 32-bit
+    uint32_t t = strtoul(_ntime, nullptr, 16);
+    _headerTemplate[68] = (uint8_t)(t & 0xFF);
+    _headerTemplate[69] = (uint8_t)((t >> 8)  & 0xFF);
+    _headerTemplate[70] = (uint8_t)((t >> 16) & 0xFF);
+    _headerTemplate[71] = (uint8_t)((t >> 24) & 0xFF);
+    // 5. Bits (encoded target) — little-endian 32-bit
+    _headerTemplate[72] = (uint8_t)(_cachedBits & 0xFF);
+    _headerTemplate[73] = (uint8_t)((_cachedBits >> 8)  & 0xFF);
+    _headerTemplate[74] = (uint8_t)((_cachedBits >> 16) & 0xFF);
+    _headerTemplate[75] = (uint8_t)((_cachedBits >> 24) & 0xFF);
+
     _jobReady = true;
 }
 
 // ---------------------------------------------------------------------------
-// _buildBlockHeader() — assemble 80-byte Bitcoin block header (nonce only varies)
-// Layout: version(4) + prevHash(32) + merkleRoot(32) + time(4) + bits(4) + nonce(4)
-// All per-job constants are already cached; this function does NO SHA-256.
+// _buildBlockHeader() — copy the pre-computed 76-byte template and write nonce.
+// All constants (version, prevHash, merkleRoot, ntime, bits) are baked into
+// _headerTemplate by _prepareJob(). This inner-loop function is allocation-free
+// and performs no hex parsing — the hot path is just memcpy + 4 byte writes.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::_buildBlockHeader(uint32_t nonce, uint8_t* header80) {
-    // 1. Version — little-endian 32-bit
-    uint32_t version = strtoul(_version, nullptr, 16);
-    header80[0] = (uint8_t)(version & 0xFF);
-    header80[1] = (uint8_t)((version >> 8)  & 0xFF);
-    header80[2] = (uint8_t)((version >> 16) & 0xFF);
-    header80[3] = (uint8_t)((version >> 24) & 0xFF);
-
-    // 2. Previous block hash (32 bytes)
-    //    Stratum sends prevHash as 64-char hex where each 4-byte word is
-    //    byte-reversed relative to the natural hash order. We reverse each
-    //    4-byte chunk to recover the correct network byte order.
-    uint8_t prevHashBytes[32] = {};
-    _hexToBytes(_prevHash, prevHashBytes, 32);
-    for (int i = 0; i < 8; i++) {
-        header80[4 + i*4 + 0] = prevHashBytes[i*4 + 3];
-        header80[4 + i*4 + 1] = prevHashBytes[i*4 + 2];
-        header80[4 + i*4 + 2] = prevHashBytes[i*4 + 1];
-        header80[4 + i*4 + 3] = prevHashBytes[i*4 + 0];
-    }
-
-    // 3. Merkle root — pre-computed once per job in _prepareJob()
-    memcpy(header80 + 36, _merkleRoot, 32);
-
-    // 4. Timestamp — little-endian 32-bit
-    uint32_t t = strtoul(_ntime, nullptr, 16);
-    header80[68] = (uint8_t)(t & 0xFF);
-    header80[69] = (uint8_t)((t >> 8)  & 0xFF);
-    header80[70] = (uint8_t)((t >> 16) & 0xFF);
-    header80[71] = (uint8_t)((t >> 24) & 0xFF);
-
-    // 5. Bits (encoded target) — use cached value, little-endian 32-bit
-    header80[72] = (uint8_t)(_cachedBits & 0xFF);
-    header80[73] = (uint8_t)((_cachedBits >> 8)  & 0xFF);
-    header80[74] = (uint8_t)((_cachedBits >> 16) & 0xFF);
-    header80[75] = (uint8_t)((_cachedBits >> 24) & 0xFF);
-
-    // 6. Nonce — little-endian 32-bit
+    memcpy(header80, _headerTemplate, 76);
     header80[76] = (uint8_t)(nonce & 0xFF);
     header80[77] = (uint8_t)((nonce >> 8)  & 0xFF);
     header80[78] = (uint8_t)((nonce >> 16) & 0xFF);
@@ -423,6 +419,19 @@ void BitcoinMiner::mine() {
     if (elapsed > 0) {
         _stats.hashrate      = (float)hashCount / (float)elapsed;
         _stats.uptimeSeconds = (millis() - _startMs) / 1000;
+    }
+    _totalHashes += hashCount;
+
+    // Heartbeat log every 30s so we can tell the miner is alive
+    uint32_t now = millis();
+    if (now - _lastReportMs > 30000UL) {
+        Serial.printf("[btc] hr=%.1f kH/s total=%lu nonce=%lu accepted=%lu rejected=%lu\n",
+                      (double)_stats.hashrate,
+                      (unsigned long)_totalHashes,
+                      (unsigned long)_jobNonce,
+                      (unsigned long)_stats.sharesAccepted,
+                      (unsigned long)_stats.sharesRejected);
+        _lastReportMs = now;
     }
 }
 

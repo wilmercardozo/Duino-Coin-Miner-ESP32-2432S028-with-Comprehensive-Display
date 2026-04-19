@@ -41,6 +41,12 @@ private:
     uint8_t  _merkleRoot[32] = {};
     uint32_t _cachedBits     = 0;
     bool     _jobReady       = false;
+    // Full 80-byte header template: bytes 0..75 are constant per job,
+    // _buildBlockHeader() just copies this and writes the nonce at 76..79.
+    uint8_t  _headerTemplate[80] = {};
+    // Periodic hashrate report
+    uint32_t _lastReportMs   = 0;
+    uint32_t _totalHashes    = 0;
 
     bool _sendSubscribe();
     bool _sendAuthorize();

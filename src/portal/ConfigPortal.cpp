@@ -212,8 +212,10 @@ void ConfigPortal::start() {
 
 void ConfigPortal::handle() {
     if (s_done) {
-        vTaskSuspendAll();   // suspend all tasks before restart
-        delay(500);
+        // Never suspend the scheduler here — delay()/vTaskDelay() assert
+        // when the scheduler is suspended. ESP.restart() is a hardware
+        // reset, it does not need tasks to be stopped beforehand.
+        delay(500);   // let the HTTP 200 flush to the browser first
         ESP.restart();
     }
 }
