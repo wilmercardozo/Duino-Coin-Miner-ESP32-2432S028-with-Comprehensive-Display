@@ -7,6 +7,8 @@
 #include "mining/DuinoCoinMiner.h"
 #include "mining/BitcoinMiner.h"
 #include "ui/UIManager.h"
+#include "portal/ConfigPortal.h"
+#include "portal/OTAHandler.h"
 #include <XPT2046_Touchscreen.h>
 
 // ── CYD touch pins ────────────────────────────────────────────────────────────
@@ -16,6 +18,7 @@
 // ── shared state ──────────────────────────────────────────────────────────────
 Config gConfig;
 volatile bool gPortalRequested = false;   // set by UIManager on long-press
+static bool gInPortalMode = false;
 
 // ── touch + UI task ───────────────────────────────────────────────────────────
 static XPT2046_Touchscreen s_touch(TOUCH_CS, TOUCH_IRQ);
@@ -32,6 +35,7 @@ static void taskUI(void*)
         } else {
             UIManager::handleTouch(s_lastX, s_lastY, false);
         }
+        OTAHandler::handle();
         UIManager::tick();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -85,12 +89,10 @@ void setup()
 
     bool hasConfig = ConfigStore::load(gConfig);
 
-    // Display comes up first so the user always sees something
-    startUI();
-
     if (!hasConfig) {
         Serial.println("[boot] No config — entering portal");
-        WiFiMgr::clearPortalFlag();
+        gInPortalMode = true;
+        ConfigPortal::start();
         return;
     }
 
@@ -98,24 +100,39 @@ void setup()
 
     if (WiFiMgr::needsPortal()) {
         Serial.println("[boot] WiFi failed — entering portal");
-        // Portal start placeholder
+        gInPortalMode = true;
+        ConfigPortal::start();
+        return;
     }
 
     if (WiFiMgr::isConnected()) {
         configTime((long)gConfig.timezone_offset * 3600, 0,
                    "pool.ntp.org", "time.nist.gov");
         Serial.println("[ntp] Sync started");
-    }
-
-    if (WiFiMgr::isConnected() && !WiFiMgr::needsPortal()) {
+        OTAHandler::init(gConfig.rig_name);
+        startUI();
         startMining();
     }
 }
 
-void loop() {
-    if (gPortalRequested) {
-        Serial.println("[portal] Long press detected — portal mode not yet implemented");
-        gPortalRequested = false;
+void loop()
+{
+    if (gInPortalMode) {
+        ConfigPortal::handle();
+        return;
     }
-    delay(1000);
+
+    if (gPortalRequested) {
+        gPortalRequested = false;
+        gInPortalMode = true;
+        ConfigPortal::start();
+        return;
+    }
+
+    static unsigned long s_lastUpdate = 0;
+    unsigned long now = millis();
+    if (gMiner && (now - s_lastUpdate >= 1000)) {
+        s_lastUpdate = now;
+        UIManager::update(gMiner->getStats());
+    }
 }
