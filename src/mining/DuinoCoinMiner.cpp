@@ -311,12 +311,14 @@ void DuinoCoinMiner::mine() {
 
     if (!_getJob()) return;
 
-    // Pre-hash the last-block-hash prefix (warm the SHA-1 state)
+    // Pre-hash the last-block-hash prefix (warm the SHA-1 state).
+    // The pool's expectedHash is SHA1(lastHash + nonce_as_decimal_string) —
+    // no separator between the two. Adding a comma here was making every
+    // computed hash mismatch, so 100% of shares came back "BAD".
     DSHA1 prefix;
     prefix.warmup();
     prefix.reset();
     prefix.write((const unsigned char*)_lastHash.c_str(), _lastHash.length());
-    prefix.write((const unsigned char*)",", 1);
 
     uint32_t startUs = micros();   // captured once; never reset inside the loop
     uint32_t yieldUs = startUs;    // separate tracker for watchdog yield cadence
@@ -357,7 +359,11 @@ void DuinoCoinMiner::mine() {
     uint32_t elapsedMs = (micros() - startUs) / 1000 + 1;
 
     _updateHashrate(found, elapsedMs);
-    _submitShare(found, elapsedMs);
+
+    // Only submit when we actually matched expectedHash. Submitting the
+    // last-tried counter on !solved just spams the pool with BAD shares
+    // and increases our reject ratio for no gain.
+    if (solved) _submitShare(found, elapsedMs);
 }
 
 // ---------------------------------------------------------------------------
