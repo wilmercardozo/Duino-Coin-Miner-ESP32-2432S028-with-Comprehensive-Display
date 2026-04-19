@@ -149,10 +149,11 @@ void DashboardScreen::update(const MiningStats& stats) {
 
     uint32_t d = stats.uptimeSeconds / 86400U;
     uint32_t h = (stats.uptimeSeconds % 86400U) / 3600U;
-    snprintf(buf, sizeof(buf), "%lud %luh", (unsigned long)d, (unsigned long)h);
+    snprintf(buf, sizeof(buf), "%ud %uh", (unsigned)d, (unsigned)h);
     lv_label_set_text(s_lblUptime, buf);
 
     // Sparkline: push new hashrate datapoint every update call
-    lv_chart_set_next_value(s_chart, s_series, (int32_t)stats.hashrate);
-    lv_chart_refresh(s_chart);
+    if (s_series) {
+        lv_chart_set_next_value(s_chart, s_series, (int32_t)stats.hashrate);
+    }
 }
