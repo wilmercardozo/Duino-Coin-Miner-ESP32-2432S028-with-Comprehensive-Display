@@ -87,9 +87,13 @@ void tick()
     uint32_t period = (s_targetFps > 0) ? (1000u / s_targetFps) : 33u;
     if (now - s_lastFlush >= period) {
         if (gMiningSnapshot.dirty) {
-            DashboardScreen::update(gMiningSnapshot.stats);
-            ClockScreen::update(gMiningSnapshot.stats);
+            MiningStats snapshot;
+            taskENTER_CRITICAL(&gMiningSnapshot.mux);
+            snapshot = gMiningSnapshot.stats;
             gMiningSnapshot.dirty = false;
+            taskEXIT_CRITICAL(&gMiningSnapshot.mux);
+            DashboardScreen::update(snapshot);
+            ClockScreen::update(snapshot);
         }
         lv_timer_handler();
         s_lastFlush = now;
@@ -98,8 +102,10 @@ void tick()
 
 void update(const MiningStats& stats)
 {
+    taskENTER_CRITICAL(&gMiningSnapshot.mux);
     gMiningSnapshot.stats = stats;
     gMiningSnapshot.dirty = true;
+    taskEXIT_CRITICAL(&gMiningSnapshot.mux);
 }
 
 void setTargetFps(uint8_t fps)

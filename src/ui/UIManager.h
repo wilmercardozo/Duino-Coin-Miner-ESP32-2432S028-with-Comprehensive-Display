@@ -1,10 +1,13 @@
 #pragma once
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 #include <lvgl.h>
 #include "mining/IMiningAlgorithm.h"
 
 struct MiningSnapshot {
     MiningStats stats;
     volatile bool dirty;
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 };
 extern MiningSnapshot gMiningSnapshot;
 

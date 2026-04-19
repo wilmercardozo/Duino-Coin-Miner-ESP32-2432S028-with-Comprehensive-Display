@@ -3,6 +3,8 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "config/ConfigStore.h"
 #include "Config.h"
 
@@ -160,7 +162,8 @@ void ConfigPortal::start() {
 
 void ConfigPortal::handle() {
     if (s_done) {
-        delay(1500);
+        vTaskSuspendAll();   // suspend all tasks before restart
+        delay(500);
         ESP.restart();
     }
 }
