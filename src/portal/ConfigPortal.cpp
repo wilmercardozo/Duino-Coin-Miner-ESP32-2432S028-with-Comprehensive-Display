@@ -108,12 +108,15 @@ void ConfigPortal::start() {
 
     s_server.on("/scan", HTTP_GET, [](AsyncWebServerRequest* req) {
         int n = WiFi.scanNetworks();
-        String json = "[";
+        JsonDocument doc;
+        JsonArray arr = doc.to<JsonArray>();
         for (int i = 0; i < n && i < 10; i++) {
-            if (i) json += ",";
-            json += "{\"ssid\":\"" + WiFi.SSID(i) + "\",\"rssi\":" + WiFi.RSSI(i) + "}";
+            JsonObject obj = arr.add<JsonObject>();
+            obj["ssid"] = WiFi.SSID(i);
+            obj["rssi"] = (int)WiFi.RSSI(i);
         }
-        json += "]";
+        String json;
+        serializeJson(doc, json);
         req->send(200, "application/json", json);
     });
 
@@ -138,13 +141,13 @@ void ConfigPortal::start() {
             cfg.pool_port       = doc["pool_port"]       | 21496;
             cfg.timezone_offset = (int8_t)((int)(doc["timezone_offset"] | -5));
             cfg.algorithm = ((int)(doc["algorithm"] | 0) == 1) ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
-            cfg.valid = true;
 
             if (cfg.wifi_ssid[0] == '\0') {
                 req->send(200, "application/json", "{\"ok\":false,\"error\":\"SSID requerido\"}");
                 return;
             }
 
+            cfg.valid = true;
             ConfigStore::save(cfg);
             Serial.println("[portal] Config saved — restarting");
             req->send(200, "application/json", "{\"ok\":true}");

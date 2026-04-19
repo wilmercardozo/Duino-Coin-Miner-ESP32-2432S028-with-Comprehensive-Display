@@ -18,7 +18,7 @@
 // ── shared state ──────────────────────────────────────────────────────────────
 Config gConfig;
 volatile bool gPortalRequested = false;   // set by UIManager on long-press
-static bool gInPortalMode = false;
+volatile bool gInPortalMode = false;
 
 // ── touch + UI task ───────────────────────────────────────────────────────────
 static XPT2046_Touchscreen s_touch(TOUCH_CS, TOUCH_IRQ);
