@@ -9,6 +9,9 @@
 // ── portal flag — defined in main.cpp, set here on long-press ────────────────
 extern volatile bool gPortalRequested;
 
+// ── cross-task snapshot (written by Core 1, consumed by Core 0) ──────────────
+MiningSnapshot gMiningSnapshot = {};
+
 // ── static state ─────────────────────────────────────────────────────────────
 static TFT_eSPI        s_tft;
 static lv_display_t*   s_disp        = nullptr;
@@ -83,6 +86,11 @@ void tick()
     uint32_t now = millis();
     uint32_t period = (s_targetFps > 0) ? (1000u / s_targetFps) : 33u;
     if (now - s_lastFlush >= period) {
+        if (gMiningSnapshot.dirty) {
+            DashboardScreen::update(gMiningSnapshot.stats);
+            ClockScreen::update(gMiningSnapshot.stats);
+            gMiningSnapshot.dirty = false;
+        }
         lv_timer_handler();
         s_lastFlush = now;
     }
@@ -90,8 +98,8 @@ void tick()
 
 void update(const MiningStats& stats)
 {
-    DashboardScreen::update(stats);
-    ClockScreen::update(stats);
+    gMiningSnapshot.stats = stats;
+    gMiningSnapshot.dirty = true;
 }
 
 void setTargetFps(uint8_t fps)

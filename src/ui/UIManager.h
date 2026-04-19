@@ -2,6 +2,12 @@
 #include <lvgl.h>
 #include "mining/IMiningAlgorithm.h"
 
+struct MiningSnapshot {
+    MiningStats stats;
+    volatile bool dirty;
+};
+extern MiningSnapshot gMiningSnapshot;
+
 namespace UIManager {
     void init();
     void tick();

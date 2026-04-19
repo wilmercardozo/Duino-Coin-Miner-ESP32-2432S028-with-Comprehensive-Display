@@ -22,14 +22,15 @@ static XPT2046_Touchscreen s_touch(TOUCH_CS, TOUCH_IRQ);
 
 static void taskUI(void*)
 {
+    int16_t s_lastX = 0, s_lastY = 0;
     for (;;) {
         if (s_touch.tirqTouched() && s_touch.touched()) {
             TS_Point p = s_touch.getPoint();
-            int16_t sx = (int16_t)map(p.x, 200, 3900, 0, 319);
-            int16_t sy = (int16_t)map(p.y, 200, 3900, 0, 239);
-            UIManager::handleTouch(sx, sy, true);
+            s_lastX = (int16_t)map(p.x, 200, 3900, 0, 319);
+            s_lastY = (int16_t)map(p.y, 200, 3900, 0, 239);
+            UIManager::handleTouch(s_lastX, s_lastY, true);
         } else {
-            UIManager::handleTouch(0, 0, false);
+            UIManager::handleTouch(s_lastX, s_lastY, false);
         }
         UIManager::tick();
         vTaskDelay(pdMS_TO_TICKS(5));
@@ -105,4 +106,10 @@ void setup()
     }
 }
 
-void loop() { delay(1000); }
+void loop() {
+    if (gPortalRequested) {
+        Serial.println("[portal] Long press detected — portal mode not yet implemented");
+        gPortalRequested = false;
+    }
+    delay(1000);
+}
