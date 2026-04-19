@@ -165,28 +165,18 @@ void ConfigScreen::create()
     lv_obj_set_style_text_font(s_lblInfoBtc, &lv_font_montserrat_14, 0);
     lv_obj_align(s_lblInfoBtc, LV_ALIGN_TOP_LEFT, 0, 48);
 
-    // Nav dots — 3 positions, this view is the third (rightmost pill)
+    // Nav dots — 4 positions; Config (view 2) is the third pill.
     static constexpr int DOT_Y = -4;
-    lv_obj_t* d0 = lv_obj_create(s_scr);
-    lv_obj_set_size(d0, 5, 5);
-    lv_obj_set_style_bg_color(d0, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(d0, 3, 0);
-    lv_obj_set_style_border_width(d0, 0, 0);
-    lv_obj_align(d0, LV_ALIGN_BOTTOM_MID, -16, DOT_Y);
-
-    lv_obj_t* d1 = lv_obj_create(s_scr);
-    lv_obj_set_size(d1, 5, 5);
-    lv_obj_set_style_bg_color(d1, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(d1, 3, 0);
-    lv_obj_set_style_border_width(d1, 0, 0);
-    lv_obj_align(d1, LV_ALIGN_BOTTOM_MID, 0, DOT_Y);
-
-    lv_obj_t* d2 = lv_obj_create(s_scr);
-    lv_obj_set_size(d2, 14, 5);
-    lv_obj_set_style_bg_color(d2, COL_ORANGE, 0);
-    lv_obj_set_style_radius(d2, 3, 0);
-    lv_obj_set_style_border_width(d2, 0, 0);
-    lv_obj_align(d2, LV_ALIGN_BOTTOM_MID, 16, DOT_Y);
+    static const int DOT_X[4] = {-24, -8, 8, 24};
+    for (int i = 0; i < 4; i++) {
+        bool active = (i == 2);
+        lv_obj_t* d = lv_obj_create(s_scr);
+        lv_obj_set_size(d, active ? 14 : 5, 5);
+        lv_obj_set_style_bg_color(d, active ? COL_ORANGE : lv_color_hex(0x333333), 0);
+        lv_obj_set_style_radius(d, 3, 0);
+        lv_obj_set_style_border_width(d, 0, 0);
+        lv_obj_align(d, LV_ALIGN_BOTTOM_MID, DOT_X[i], DOT_Y);
+    }
 }
 
 void ConfigScreen::load()

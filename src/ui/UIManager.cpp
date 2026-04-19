@@ -2,6 +2,7 @@
 #include "DashboardScreen.h"
 #include "ClockScreen.h"
 #include "ConfigScreen.h"
+#include "SystemScreen.h"
 #include "SplashScreen.h"
 
 #include <TFT_eSPI.h>
@@ -27,8 +28,8 @@ static uint32_t        s_lastFlush   = 0;
 static bool     s_pressing   = false;
 static uint32_t s_pressStart = 0;
 
-// view management (0 = Dashboard, 1 = Clock, 2 = Config)
-static constexpr uint8_t kViewCount = 3;
+// view management (0 = Dashboard, 1 = Clock, 2 = Config, 3 = System)
+static constexpr uint8_t kViewCount = 4;
 static uint8_t s_curView = 0;
 
 // ── TFT_eSPI flush callback ───────────────────────────────────────────────────
@@ -53,6 +54,7 @@ static void switchView(uint8_t view)
         case 0:  DashboardScreen::load(); break;
         case 1:  ClockScreen::load();     break;
         case 2:  ConfigScreen::load();    break;
+        case 3:  SystemScreen::load();    break;
         default: DashboardScreen::load(); break;
     }
 }
@@ -85,6 +87,7 @@ void init()
     DashboardScreen::create();
     ClockScreen::create();
     ConfigScreen::create();
+    SystemScreen::create();
     SplashScreen::load();
 }
 
@@ -102,6 +105,7 @@ void tick()
             DashboardScreen::update(snapshot);
             ClockScreen::update(snapshot);
             ConfigScreen::update(snapshot);
+            SystemScreen::update(snapshot);
         }
         lv_timer_handler();
         s_lastFlush = now;
@@ -151,6 +155,7 @@ void handleTouch(int16_t x, int16_t y, bool pressed)
                 // content, so middle taps there are no-ops.
                 ConfigScreen::handleTap(x, y);
             }
+            // View 3 (System) is read-only; no tap handler.
         }
     }
 }

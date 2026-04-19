@@ -94,27 +94,17 @@ void ClockScreen::create()
     lv_label_set_long_mode(s_lblPool, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(s_lblPool, LV_TEXT_ALIGN_CENTER, 0);
 
-    // Nav dots — 3 positions; Clock (view 1) is the middle pill.
-    lv_obj_t* d0 = lv_obj_create(s_scr);
-    lv_obj_set_size(d0, 5, 5);
-    lv_obj_set_style_bg_color(d0, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(d0, 3, 0);
-    lv_obj_set_style_border_width(d0, 0, 0);
-    lv_obj_align(d0, LV_ALIGN_BOTTOM_MID, -16, -2);
-
-    lv_obj_t* d1 = lv_obj_create(s_scr);
-    lv_obj_set_size(d1, 14, 5);
-    lv_obj_set_style_bg_color(d1, COL_ORANGE, 0);
-    lv_obj_set_style_radius(d1, 3, 0);
-    lv_obj_set_style_border_width(d1, 0, 0);
-    lv_obj_align(d1, LV_ALIGN_BOTTOM_MID, 0, -2);
-
-    lv_obj_t* d2 = lv_obj_create(s_scr);
-    lv_obj_set_size(d2, 5, 5);
-    lv_obj_set_style_bg_color(d2, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_radius(d2, 3, 0);
-    lv_obj_set_style_border_width(d2, 0, 0);
-    lv_obj_align(d2, LV_ALIGN_BOTTOM_MID, 16, -2);
+    // Nav dots — 4 positions; Clock (view 1) is the second pill.
+    static const int DOT_X[4] = {-24, -8, 8, 24};
+    for (int i = 0; i < 4; i++) {
+        bool active = (i == 1);
+        lv_obj_t* d = lv_obj_create(s_scr);
+        lv_obj_set_size(d, active ? 14 : 5, 5);
+        lv_obj_set_style_bg_color(d, active ? COL_ORANGE : lv_color_hex(0x333333), 0);
+        lv_obj_set_style_radius(d, 3, 0);
+        lv_obj_set_style_border_width(d, 0, 0);
+        lv_obj_align(d, LV_ALIGN_BOTTOM_MID, DOT_X[i], -2);
+    }
 }
 
 void ClockScreen::load()
