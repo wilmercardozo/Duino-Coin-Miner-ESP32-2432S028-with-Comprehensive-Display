@@ -34,8 +34,9 @@ static void taskUI(void*)
     for (;;) {
         if (s_touch.tirqTouched() && s_touch.touched()) {
             TS_Point p = s_touch.getPoint();
-            s_lastX = (int16_t)map(p.x, 200, 3900, 0, 319);
-            s_lastY = (int16_t)map(p.y, 200, 3900, 0, 239);
+            // rotation 3 — invert both axes from raw XPT2046 coords
+            s_lastX = (int16_t)map(p.x, 200, 3900, 319, 0);
+            s_lastY = (int16_t)map(p.y, 200, 3900, 239, 0);
             UIManager::handleTouch(s_lastX, s_lastY, true);
         } else {
             UIManager::handleTouch(s_lastX, s_lastY, false);

@@ -61,7 +61,7 @@ void init()
 {
     // 1. Hardware init
     s_tft.init();
-    s_tft.setRotation(1);   // landscape — ESP32-2432S028R with TFT_INVERSION_ON
+    s_tft.setRotation(3);   // landscape, USB-left orientation for Will's CYD clone
 
     // 2. LVGL init
     lv_init();
