@@ -180,9 +180,19 @@ void ConfigPortal::start() {
             strlcpy(cfg.btc_address, doc["btc_address"] | "", sizeof(cfg.btc_address));
             strlcpy(cfg.pool_url,    doc["pool_url"]    | "public-pool.io", sizeof(cfg.pool_url));
             strlcpy(cfg.rig_name,    doc["rig_name"]    | "NerdDuino-1", sizeof(cfg.rig_name));
-            cfg.pool_port       = doc["pool_port"]       | 21496;
-            cfg.timezone_offset = (int8_t)((int)(doc["timezone_offset"] | -5));
-            cfg.algorithm = ((int)(doc["algorithm"] | 0) == 1) ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
+            // Form fields arrive as JSON strings (FormData stringifies everything).
+            // ArduinoJson v7's `| default` returns default when type mismatches,
+            // so use .as<int>() which parses string numerics ("1" -> 1).
+            int port = doc["pool_port"].as<int>();
+            cfg.pool_port = (port > 0 && port < 65536) ? (uint16_t)port : 21496;
+
+            int tz = doc["timezone_offset"].as<int>();
+            cfg.timezone_offset = (int8_t)((tz >= -12 && tz <= 14) ? tz : -5);
+
+            int alg = doc["algorithm"].as<int>();
+            cfg.algorithm = (alg == 1) ? Algorithm::BITCOIN : Algorithm::DUINOCOIN;
+            Serial.printf("[portal] algorithm selected: %s (raw=%d)\n",
+                          cfg.algorithm == Algorithm::BITCOIN ? "BITCOIN" : "DUINOCOIN", alg);
 
             if (cfg.wifi_ssid[0] == '\0') {
                 req->send(200, "application/json", "{\"ok\":false,\"error\":\"SSID requerido\"}");

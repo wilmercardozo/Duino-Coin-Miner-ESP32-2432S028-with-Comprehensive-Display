@@ -75,8 +75,19 @@ static void taskMining(void* param)
 void startMining()
 {
     if (gConfig.algorithm == Algorithm::DUINOCOIN) {
+        if (gConfig.duco_user[0] == '\0') {
+            Serial.println("[mining] DUCO selected but duco_user empty — skipping miner start");
+            return;
+        }
+        Serial.printf("[mining] starting DuinoCoinMiner (user=%s)\n", gConfig.duco_user);
         gMiner = new DuinoCoinMiner(gConfig);
     } else {
+        if (gConfig.btc_address[0] == '\0') {
+            Serial.println("[mining] BTC selected but btc_address empty — skipping miner start");
+            return;
+        }
+        Serial.printf("[mining] starting BitcoinMiner (addr=%s pool=%s:%u)\n",
+                      gConfig.btc_address, gConfig.pool_url, (unsigned)gConfig.pool_port);
         gMiner = new BitcoinMiner(gConfig);
     }
     if (gMiner) {

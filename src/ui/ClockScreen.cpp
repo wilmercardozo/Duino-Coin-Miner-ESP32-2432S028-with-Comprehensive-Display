@@ -129,7 +129,7 @@ void ClockScreen::update(const MiningStats& stats)
         lv_label_set_text(s_lblTime, timeBuf);
 
         char dateBuf[32];
-        snprintf(dateBuf, sizeof(dateBuf), "%s · %d %s %d",
+        snprintf(dateBuf, sizeof(dateBuf), "%s | %d %s %d",
                  DAYS[t.tm_wday], t.tm_mday,
                  MONTHS[t.tm_mon], 1900 + t.tm_year);
         lv_label_set_text(s_lblDate, dateBuf);

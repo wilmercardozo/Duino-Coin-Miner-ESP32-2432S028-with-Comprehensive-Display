@@ -527,10 +527,11 @@ bool DuinoCoinMiner::_parseJobLine(const String& line) {
     }
 
     if (tokens[0].length() < 8 || tokens[1].length() < 40 || tokens[2].length() < 1) {
-        Serial.printf("[DUCO] job malformed: len0=%u len1=%u len2=%u\n",
+        Serial.printf("[DUCO] job malformed: len0=%u len1=%u len2=%u raw=\"%s\"\n",
                       (unsigned)tokens[0].length(),
                       (unsigned)tokens[1].length(),
-                      (unsigned)tokens[2].length());
+                      (unsigned)tokens[2].length(),
+                      line.c_str());
         return false;
     }
 
