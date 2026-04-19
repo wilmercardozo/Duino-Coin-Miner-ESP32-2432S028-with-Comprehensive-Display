@@ -37,6 +37,13 @@ private:
     // time of last successful submit (ms) — reconnect if stale
     uint32_t _lastSubmitMs = 0;
 
+    // Phase-breakdown accumulators for the 10 s performance log — lets us
+    // tell whether hr is bottlenecked on CPU (hash loop) or pool I/O (getJob).
+    uint32_t _accumHashMs     = 0;
+    uint32_t _accumGetJobMs   = 0;
+    uint32_t _accumJobs       = 0;
+    uint32_t _lastBreakdownMs = 0;
+
     bool _resolvePool();
     bool _connectToNode();
     bool _waitForData(uint32_t timeoutMs);

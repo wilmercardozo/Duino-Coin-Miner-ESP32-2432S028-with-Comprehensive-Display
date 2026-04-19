@@ -317,7 +317,9 @@ void DuinoCoinMiner::mine() {
         return;
     }
 
+    uint32_t getJobStart = millis();
     if (!_getJob()) return;
+    uint32_t getJobMs = millis() - getJobStart;
 
     // Pre-hash the last-block-hash prefix (warm the SHA-1 state).
     // The pool's expectedHash is SHA1(lastHash + nonce_as_decimal_string) —
@@ -347,15 +349,13 @@ void DuinoCoinMiner::mine() {
             break;
         }
 
-        // Yield to RTOS every ~100ms to prevent watchdog trips
+        // Yield to RTOS every ~100ms to prevent watchdog trips.  We used to
+        // also poll _client.connected() here — that was a syscall per yield
+        // and bought us nothing: _submitShare already detects a dead socket
+        // when its write fails, and mine() reconnects at the next iteration.
         if ((micros() - yieldUs) > 100000UL) {
             delay(1);
             yieldUs = micros();
-            if (!_client.connected()) {
-                Serial.println("[DUCO] connection dropped during hash loop");
-                _client.stop();
-                return;
-            }
         }
     }
 
@@ -367,6 +367,29 @@ void DuinoCoinMiner::mine() {
     uint32_t elapsedMs = (micros() - startUs) / 1000 + 1;
 
     _updateHashrate(found, elapsedMs);
+
+    // Phase breakdown so we can tell whether low kH/s comes from slow hash
+    // (CPU-bound, would need a faster DSHA1) or slow pool I/O (TCP stack,
+    // would need tcp-nodelay or a closer pool).  Print at most every 10 s.
+    _accumGetJobMs += getJobMs;
+    _accumHashMs   += elapsedMs;
+    _accumJobs++;
+    uint32_t nowMs = millis();
+    if (nowMs - _lastBreakdownMs >= 10000UL) {
+        uint32_t totalMs = _accumGetJobMs + _accumHashMs;
+        if (totalMs == 0) totalMs = 1;
+        Serial.printf("[DUCO] last10s: jobs=%lu hash=%lums(%.0f%%) getJob=%lums(%.0f%%) hr=%.1f kH/s diff=%lu\n",
+                      (unsigned long)_accumJobs,
+                      (unsigned long)_accumHashMs,
+                      100.0 * _accumHashMs / totalMs,
+                      (unsigned long)_accumGetJobMs,
+                      100.0 * _accumGetJobMs / totalMs,
+                      _stats.hashrate,
+                      (unsigned long)_jobDiff);
+        _accumGetJobMs = _accumHashMs = 0;
+        _accumJobs = 0;
+        _lastBreakdownMs = nowMs;
+    }
 
     // Only submit when we actually matched expectedHash. Submitting the
     // last-tried counter on !solved just spams the pool with BAD shares
