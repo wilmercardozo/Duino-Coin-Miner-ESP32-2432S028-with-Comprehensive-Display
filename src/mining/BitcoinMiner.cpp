@@ -26,9 +26,16 @@ BitcoinMiner::BitcoinMiner(const Config& cfg) : _cfg(cfg) {
     char shortUrl[58];
     strlcpy(shortUrl, cfg.pool_url, sizeof(shortUrl));
     snprintf(_stats.poolUrl, sizeof(_stats.poolUrl), "%s:%d", shortUrl, cfg.pool_port);
+
+    _jobMutex    = xSemaphoreCreateMutex();
+    _clientMutex = xSemaphoreCreateMutex();
 }
 
-BitcoinMiner::~BitcoinMiner() { disconnect(); }
+BitcoinMiner::~BitcoinMiner() {
+    disconnect();
+    if (_jobMutex)    vSemaphoreDelete(_jobMutex);
+    if (_clientMutex) vSemaphoreDelete(_clientMutex);
+}
 
 // ---------------------------------------------------------------------------
 // connect() — TCP connect, subscribe, authorize
@@ -131,7 +138,7 @@ bool BitcoinMiner::_parseNotify(const String& line) {
     strlcpy(_nbits,   p[6] | "", sizeof(_nbits));
     strlcpy(_ntime,   p[7] | "", sizeof(_ntime));
     bool cleanJobs = p[8] | false;
-    if (cleanJobs) _jobNonce = 0;
+    if (cleanJobs) __atomic_store_n(&_nonceHead, 0u, __ATOMIC_RELAXED);
     _hasJob = true;
 
     _prepareJob();
@@ -166,7 +173,13 @@ void BitcoinMiner::_bytesToHex(const uint8_t* in, size_t len, char* out) {
 // cache bytes 64..75 into _tailBuf so the inner loop only writes the nonce.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::_prepareJob() {
+    // Block the hash batches while we rebuild midstate/tail — they'd otherwise
+    // race against memcpy.  Mutex is held only during the final swap below;
+    // the expensive SHA256 work on the coinbase runs outside the critical section.
+    if (_jobMutex) xSemaphoreTake(_jobMutex, portMAX_DELAY);
     _jobReady = false;
+    if (_jobMutex) xSemaphoreGive(_jobMutex);
+
     _cachedBits = strtoul(_nbits, nullptr, 16);
 
     // --- Build coinbase hex: coinb1 + extranonce1 + extranonce2(zeros) + coinb2
@@ -242,10 +255,14 @@ void BitcoinMiner::_prepareJob() {
     // bytes 76..79 = nonce (zero here; filled by inner loop via _tailBuf)
 
     // --- Compute midstate over bytes 0..63 once; cache tail 64..79 for reuse
+    // Update shared state atomically so the secondary task never sees a
+    // half-written midstate.
+    if (_jobMutex) xSemaphoreTake(_jobMutex, portMAX_DELAY);
     nerd_mids(_midstate.digest, header);
     memcpy(_tailBuf, header + 64, 16);   // _tailBuf[12..15] will carry the nonce
-
+    strlcpy(_stats.jobId, _jobId, sizeof(_stats.jobId));
     _jobReady = true;
+    if (_jobMutex) xSemaphoreGive(_jobMutex);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +301,10 @@ bool BitcoinMiner::_meetsTarget(const uint8_t* hash32) {
 // used to freeze the hash loop right after every share.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::_submitShare(uint32_t nonce) {
-    // find a free slot (drop oldest silently if full — pool will just re-reject)
+    // Both primary and secondary tasks can call this — serialize via mutex
+    // so writes to _client and _pending[] are never interleaved.
+    if (_clientMutex) xSemaphoreTake(_clientMutex, portMAX_DELAY);
+
     int slot = -1;
     for (int i = 0; i < kMaxPending; i++) {
         if (!_pending[i].inFlight) { slot = i; break; }
@@ -314,6 +334,7 @@ void BitcoinMiner::_submitShare(uint32_t nonce) {
         (unsigned long)id, worker, _jobId, extranonce2, _ntime, nonceBuf);
     _client.print(req);
 
+    if (_clientMutex) xSemaphoreGive(_clientMutex);
     Serial.printf("[btc] Share submitted — id=%lu nonce=%s\n", (unsigned long)id, nonceBuf);
 }
 
@@ -328,25 +349,126 @@ void BitcoinMiner::_handleSubmitResponse(const String& line) {
     uint32_t id = doc["id"] | 0u;
     if (id < 10) return;   // not one of our submits
 
+    if (_clientMutex) xSemaphoreTake(_clientMutex, portMAX_DELAY);
+
     int slot = -1;
     for (int i = 0; i < kMaxPending; i++) {
         if (_pending[i].inFlight && _pending[i].id == id) { slot = i; break; }
     }
-    if (slot < 0) return;  // response for an already-forgotten id
+    if (slot < 0) {
+        if (_clientMutex) xSemaphoreGive(_clientMutex);
+        return;
+    }
 
     bool accepted = doc["result"].is<bool>() && (doc["result"].as<bool>());
     if (accepted) {
         _stats.sharesAccepted++;
-        Serial.printf("[btc] Share %lu accepted\n", (unsigned long)id);
     } else {
         _stats.sharesRejected++;
-        Serial.printf("[btc] Share %lu rejected: %s\n", (unsigned long)id, line.c_str());
     }
     _pending[slot].inFlight = false;
+    if (_clientMutex) xSemaphoreGive(_clientMutex);
+
+    if (accepted) Serial.printf("[btc] Share %lu accepted\n", (unsigned long)id);
+    else          Serial.printf("[btc] Share %lu rejected: %s\n", (unsigned long)id, line.c_str());
 }
 
 // ---------------------------------------------------------------------------
-// mine() — drain pool messages, then hash a batch using midstate
+// _shareDifficulty() — approximate share diff from the top 64 bits of the
+// double-SHA256 hash.  Works in LE: byte 31 is the MSByte.  A "diff 1" target
+// has its top 32 bits equal to 0x00000000 and the next 16 bits = 0xFFFF, so
+// diff = 0xFFFF0000_00000000 / top64_of_hash (BE interpretation).
+// ---------------------------------------------------------------------------
+double BitcoinMiner::_shareDifficulty(const uint8_t* hash32) {
+    uint64_t head = 0;
+    for (int i = 31; i >= 24; i--) head = (head << 8) | hash32[i];
+    if (head == 0) return 1e18;
+    // 0xFFFF000000000000 = 18446462598732840960.0
+    return 18446462598732840960.0 / (double)head;
+}
+
+// ---------------------------------------------------------------------------
+// _hashBatch() — hash up to batchSize nonces using a local snapshot of the
+// shared job state.  Called from both mine() (primary) and secondaryMine().
+// Returns the number of hashes actually performed (may be 0 if the job
+// changed mid-batch).
+// ---------------------------------------------------------------------------
+uint32_t BitcoinMiner::_hashBatch(uint32_t batchSize) {
+    // 1. Snapshot the shared job state under the mutex so concurrent updates
+    //    from _prepareJob can't tear our midstate/tail mid-copy.
+    nerdSHA256_context midLocal;
+    uint8_t  tailLocal[16];
+    uint32_t bitsLocal;
+    bool     ready;
+    if (_jobMutex) xSemaphoreTake(_jobMutex, portMAX_DELAY);
+    ready = _jobReady;
+    if (ready) {
+        memcpy(&midLocal, &_midstate, sizeof(midLocal));
+        memcpy(tailLocal, _tailBuf, sizeof(tailLocal));
+        bitsLocal = _cachedBits;
+    }
+    if (_jobMutex) xSemaphoreGive(_jobMutex);
+    if (!ready) return 0;
+
+    // 2. Atomically reserve a nonce range; both tasks share the same counter.
+    uint32_t base = __atomic_fetch_add(&_nonceHead, batchSize, __ATOMIC_RELAXED);
+
+    uint32_t startMs = millis();
+    uint8_t  hash[32];
+
+    for (uint32_t i = 0; i < batchSize; i++) {
+        uint32_t nonce = base + i;
+        tailLocal[12] = (uint8_t)(nonce & 0xFF);
+        tailLocal[13] = (uint8_t)((nonce >> 8)  & 0xFF);
+        tailLocal[14] = (uint8_t)((nonce >> 16) & 0xFF);
+        tailLocal[15] = (uint8_t)((nonce >> 24) & 0xFF);
+
+        bool maybe = nerd_sha256d(&midLocal, tailLocal, hash);
+
+        if (maybe) {
+            // Track best diff seen (approx) — cheap, only on passes of the
+            // early-exit filter (~1 in 65536 nonces).
+            double diff = _shareDifficulty(hash);
+            if (diff > (double)_bestDiff) _bestDiff = (float)diff;
+
+            if (_meetsTarget(hash)) {
+                _submitShare(nonce);
+            }
+        }
+
+        if ((i & 0x3FFu) == 0x3FFu) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
+
+    // 3. Contribute to cumulative totals and recompute hashrate.
+    __atomic_fetch_add(&_totalHashes, (uint64_t)batchSize, __ATOMIC_RELAXED);
+
+    uint32_t elapsed = millis() - startMs;
+    if (elapsed > 0) {
+        // Approx combined hashrate: batch/elapsed, averaged across the last
+        // few batches.  Two tasks writing to _stats.hashrate alternate but
+        // the UI only samples once per second so glitches are invisible.
+        float inst = (float)batchSize / (float)elapsed;
+        _stats.hashrate = (_stats.hashrate * 0.5f) + (inst * 0.5f);
+    }
+
+    uint32_t now = millis();
+    if (now - _lastReportMs > 30000UL) {
+        Serial.printf("[btc] hr=%.1f kH/s total=%llu bestDiff=%.2f accepted=%lu rejected=%lu\n",
+                      (double)_stats.hashrate,
+                      (unsigned long long)_totalHashes,
+                      (double)_bestDiff,
+                      (unsigned long)_stats.sharesAccepted,
+                      (unsigned long)_stats.sharesRejected);
+        _lastReportMs = now;
+    }
+
+    return batchSize;
+}
+
+// ---------------------------------------------------------------------------
+// mine() — primary task: drain pool I/O, then hash a batch.
 // ---------------------------------------------------------------------------
 void BitcoinMiner::mine() {
     // Drain incoming pool messages: new jobs, difficulty updates, share responses.
@@ -368,60 +490,43 @@ void BitcoinMiner::mine() {
     if (!_client.connected()) {
         Serial.println("[btc] Disconnected — reconnecting");
         disconnect();
-        if (!connect()) {
-            vTaskDelay(pdMS_TO_TICKS(5000));
-        }
+        if (!connect()) vTaskDelay(pdMS_TO_TICKS(5000));
         return;
     }
 
-    // --- hash loop: yield every 1024 nonces and update hashrate on each yield
-    uint32_t startMs   = millis();
-    uint32_t hashCount = 0;
-    const uint32_t BATCH_SIZE = 10000;
-    uint8_t hash[32];
+    _hashBatch(10000);
+}
 
-    for (uint32_t i = 0; i < BATCH_SIZE; i++) {
-        uint32_t nonce = _jobNonce++;
-        _tailBuf[12] = (uint8_t)(nonce & 0xFF);
-        _tailBuf[13] = (uint8_t)((nonce >> 8)  & 0xFF);
-        _tailBuf[14] = (uint8_t)((nonce >> 16) & 0xFF);
-        _tailBuf[15] = (uint8_t)((nonce >> 24) & 0xFF);
-
-        bool maybe = nerd_sha256d(&_midstate, _tailBuf, hash);
-        hashCount++;
-
-        if (maybe && _meetsTarget(hash)) {
-            _submitShare(nonce);
-        }
-
-        if ((i & 0x3FFu) == 0x3FFu) {
-            // Update stats every 1024 hashes so the UI doesn't see a stale
-            // value mid-batch when a share or a difficulty change lands.
-            uint32_t elapsed = millis() - startMs;
-            if (elapsed > 0) _stats.hashrate = (float)hashCount / (float)elapsed;
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
+// ---------------------------------------------------------------------------
+// secondaryMine() — core-0 task: hash only, no network I/O.
+// ---------------------------------------------------------------------------
+void BitcoinMiner::secondaryMine() {
+    if (!_jobReady || !_client.connected()) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        return;
     }
-
-    uint32_t elapsed = millis() - startMs;
-    if (elapsed > 0) _stats.hashrate = (float)hashCount / (float)elapsed;
-    _stats.uptimeSeconds = (millis() - _startMs) / 1000;
-    _totalHashes += hashCount;
-
-    uint32_t now = millis();
-    if (now - _lastReportMs > 30000UL) {
-        Serial.printf("[btc] hr=%.1f kH/s total=%lu nonce=%lu accepted=%lu rejected=%lu\n",
-                      (double)_stats.hashrate,
-                      (unsigned long)_totalHashes,
-                      (unsigned long)_jobNonce,
-                      (unsigned long)_stats.sharesAccepted,
-                      (unsigned long)_stats.sharesRejected);
-        _lastReportMs = now;
-    }
+    _hashBatch(10000);
 }
 
 MiningStats BitcoinMiner::getStats() {
-    _stats.uptimeSeconds = (millis() - _startMs) / 1000;
+    _stats.uptimeSeconds  = (millis() - _startMs) / 1000;
+    _stats.bestDifficulty = _bestDiff;
+    _stats.totalHashes    = _totalHashes;
+
+    // Pool target difficulty from nbits: diff = diff1 / target.  Using the
+    // top 32 bits gives a good-enough integer for display purposes.
+    if (_cachedBits) {
+        uint8_t  exp      = (uint8_t)(_cachedBits >> 24);
+        uint32_t mantissa = _cachedBits & 0x00FFFFFFu;
+        if (mantissa && exp >= 3) {
+            double target = (double)mantissa;
+            for (int i = 0; i < (int)exp - 3; i++) target *= 256.0;
+            double diff1 = 0xFFFF0000ULL;
+            for (int i = 0; i < 26; i++) diff1 *= 256.0;  // diff1 shifted up 208 bits
+            double d = diff1 / target;
+            _stats.currentDifficulty = (d > 4.2e9) ? UINT32_MAX : (uint32_t)d;
+        }
+    }
     return _stats;
 }
 

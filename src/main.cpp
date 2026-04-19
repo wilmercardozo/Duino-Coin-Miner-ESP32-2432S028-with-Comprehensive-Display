@@ -72,6 +72,21 @@ static void taskMining(void* param)
     }
 }
 
+// Secondary BTC hashing task — runs on core 0 alongside the UI.  Uses
+// low priority (1) so the UI task (priority 2) preempts it whenever
+// there's a touch event or a render tick.  Only spawned for BTC; DUCO
+// is single-core since Duino-Coin is not CPU-bound on an ESP32.
+static void taskMiningSecondary(void* param)
+{
+    BitcoinMiner* btc = (BitcoinMiner*)param;
+    // Wait for the primary to finish connect() — secondary shouldn't start
+    // hashing against stale state.
+    while (!btc) { vTaskDelay(pdMS_TO_TICKS(100)); }
+    for (;;) {
+        btc->secondaryMine();
+    }
+}
+
 // Periodic balance refresh — low-priority task on core 0.  Runs forever,
 // polling the miner's public balance API (DUCO only; BTC is no-op).  Kept
 // separate from the mining task so the TLS round-trip can't stall hashing.
@@ -107,6 +122,13 @@ void startMining()
         // uses its own heap; the task mostly waits).  Low priority (1) and
         // pinned to core 0 to avoid stealing cycles from mining on core 1.
         xTaskCreatePinnedToCore(taskBalance, "balance", 6144, nullptr, 1, nullptr, 0);
+
+        // Dual-core hashing for BTC only.  Secondary runs on core 0 at
+        // priority 1 (below UI at 2) so the UI remains responsive.
+        if (gConfig.algorithm == Algorithm::BITCOIN) {
+            xTaskCreatePinnedToCore(taskMiningSecondary, "mining2", 8192,
+                                    gMiner, 1, nullptr, 0);
+        }
     }
 }
 

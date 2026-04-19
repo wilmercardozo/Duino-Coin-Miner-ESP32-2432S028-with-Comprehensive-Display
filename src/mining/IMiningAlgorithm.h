@@ -2,14 +2,20 @@
 #include <stdint.h>
 
 struct MiningStats {
-    float    hashrate       = 0.0f;   // kH/s
-    uint32_t sharesAccepted = 0;
-    uint32_t sharesRejected = 0;
-    float    balance        = 0.0f;
-    uint32_t uptimeSeconds  = 0;
-    uint32_t pingMs         = 0;
-    char     poolUrl[64]    = "";
-    char     algorithm[16]  = "";     // "DUCO" or "BTC"
+    float    hashrate          = 0.0f;   // kH/s (sum across cores for BTC)
+    uint32_t sharesAccepted    = 0;
+    uint32_t sharesRejected    = 0;
+    float    balance           = 0.0f;
+    uint32_t uptimeSeconds     = 0;
+    uint32_t pingMs            = 0;
+    char     poolUrl[64]       = "";
+    char     algorithm[16]     = "";     // "DUCO" or "BTC"
+
+    // BTC-only extras (zero for DUCO)
+    float    bestDifficulty    = 0.0f;   // highest share diff seen in this session
+    uint32_t currentDifficulty = 0;      // pool target diff (derived from nbits)
+    uint64_t totalHashes       = 0;      // cumulative hashes since connect
+    char     jobId[16]         = "";     // current Stratum job id (truncated)
 };
 
 class IMiningAlgorithm {

@@ -6,6 +6,8 @@
 #include "Config.h"
 #include "nerdSHA256plus.h"
 #include <WiFiClient.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 class BitcoinMiner : public IMiningAlgorithm {
 public:
@@ -13,16 +15,20 @@ public:
     ~BitcoinMiner() override;
 
     bool connect()         override;
-    void mine()            override;
+    void mine()            override;   // primary: pool pump + hash
     MiningStats getStats() override;
     void disconnect()      override;
+
+    // Secondary task entry point (dual-core BTC hashing).  No network I/O;
+    // just hashes against the current job using an atomic nonce dispenser.
+    void secondaryMine();
 
 private:
     const Config& _cfg;
     WiFiClient    _client;
     MiningStats   _stats;
     uint32_t      _startMs        = 0;
-    uint32_t      _jobNonce       = 0;
+    volatile uint32_t _nonceHead  = 0;  // atomic nonce dispenser (both tasks)
 
     // Stratum job state
     char _jobId[64]         = "";
@@ -46,11 +52,18 @@ private:
     uint8_t            _tailBuf[16]  = {};  // bytes 64..79 of header; nonce in [12..15]
     uint8_t            _merkleRoot[32] = {};
     uint32_t           _cachedBits     = 0;
-    bool               _jobReady       = false;
+    volatile bool      _jobReady       = false;
 
-    // Periodic hashrate report
-    uint32_t _lastReportMs   = 0;
-    uint32_t _totalHashes    = 0;
+    // Mutexes — created lazily in connect().  _jobMutex guards updates to the
+    // job-shared state (_midstate, _tailBuf, _cachedBits, _jobReady, jobId).
+    // _clientMutex guards _client writes and _pending[] from the secondary task.
+    SemaphoreHandle_t _jobMutex    = nullptr;
+    SemaphoreHandle_t _clientMutex = nullptr;
+
+    // Per-session counters (both tasks contribute; updated atomically)
+    uint32_t _lastReportMs  = 0;
+    uint64_t _totalHashes   = 0;     // sum across both cores
+    float    _bestDiff      = 0.0f;  // highest share difficulty seen
 
     // Pending share submissions (non-blocking): we fire-and-forget the submit
     // line, then read the response on a later mine() iteration. A small FIFO
@@ -71,4 +84,12 @@ private:
     void _handleSubmitResponse(const String& line);
     void _hexToBytes(const char* hex, uint8_t* out, size_t maxBytes);
     void _bytesToHex(const uint8_t* in, size_t len, char* out);
+
+    // Hash a fixed batch using a local copy of the job state.  Returns the
+    // number of hashes performed.  Both mine() and secondaryMine() use this.
+    uint32_t _hashBatch(uint32_t batchSize);
+
+    // Compute the approximate share difficulty of a 32-byte hash (LE, byte 31=MSB).
+    // Used to track the best share seen.  Cheap: only looks at the top 64 bits.
+    static double _shareDifficulty(const uint8_t* hash32);
 };
